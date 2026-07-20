@@ -3,9 +3,8 @@
 import { useState, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { checkQr } from "@/lib/auth-api";
-import AuthGuard from "@/components/auth/AuthGuard";
 import AppShell from "@/components/AppShell";
-import { Camera, Check, X, Pencil } from "lucide-react";
+import { Camera, Check, X, Pencil, User } from "lucide-react";
 
 function ProfilePage() {
   const { user, token, updateProfile } = useAuth();
@@ -119,7 +118,22 @@ function ProfilePage() {
   return (
     <AppShell title="个人主页" activeNav="profile">
       <div className="mx-auto max-w-md px-4 py-6">
-        {/* 头像区域 */}
+        {/* 未登录 */}
+        {!user && (
+          <div className="py-16 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
+              <User className="h-8 w-8 text-slate-300" />
+            </div>
+            <p className="mt-4 text-sm font-medium text-slate-500">请先登录</p>
+            <p className="mt-1 text-xs text-slate-400">
+              登录后即可查看和编辑个人资料
+            </p>
+          </div>
+        )}
+
+        {/* 已登录内容 */}
+        {user && (
+        <>
         <div className="mb-8 flex flex-col items-center">
           <div className="group relative">
             <div
@@ -302,15 +316,11 @@ function ProfilePage() {
             保存中...
           </div>
         )}
+        </>
+        )}
       </div>
     </AppShell>
   );
 }
 
-export default function ProfilePageWrapper() {
-  return (
-    <AuthGuard>
-      <ProfilePage />
-    </AuthGuard>
-  );
-}
+export default ProfilePage;

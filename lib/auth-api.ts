@@ -1,9 +1,37 @@
 /**
- * AI Hub 后端 API 客户端
- * 对接 ai-hub-backend（Express）
+ * AI Hub API 客户端
+ * 调用 Next.js API Routes（同域部署）
  */
+import {
+  localSendCode,
+  localVerifyCode,
+  localFetchProfile,
+  localUpdateProfile,
+  localCheckQr,
+  localFetchPosts,
+  localFetchPost,
+  localCreatePost,
+  localAddComment,
+} from "./local-store";
 
 const API_BASE = "";
+
+// 降级开关：API 不可达时转 localStorage
+let useLocal = false;
+
+async function apiFetch(path: string, options?: RequestInit) {
+  if (useLocal) throw new Error("offline");
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: { "Content-Type": "application/json", ...options?.headers },
+    });
+    return res;
+  } catch {
+    useLocal = true;
+    throw new Error("offline");
+  }
+}
 
 export interface UserProfile {
   email: string;
@@ -37,184 +65,126 @@ export interface Comment {
   createdAt: string;
 }
 
-interface ApiResult<T> {
-  success?: boolean;
-  error?: string;
-  [key: string]: unknown;
+// Token header
+function authH(token: string) {
+  return { Authorization: `Bearer ${token}` };
 }
 
-// ==================== 认证 API ====================
+// ==================== 认证 ====================
 
-interface SendCodeResult {
-  success: boolean;
-  message?: string;
-  error?: string;
-}
-
-interface VerifyCodeResult {
-  success: boolean;
-  token?: string;
-  expiresAt?: number;
-  user?: UserProfile;
-  error?: string;
-}
-
-/** 发送验证码 */
-export async function sendCode(email: string): Promise<SendCodeResult> {
+export async function sendCode(email: string) {
   try {
-    const res = await fetch(`${API_BASE}/api/send-code`, {
+    const res = await apiFetch("/api/send-code", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
     });
     return await res.json();
   } catch {
-    return { success: false, error: "无法连接服务器" };
+    return localSendCode(email);
   }
 }
 
-/** 校验验证码并登录 */
-export async function verifyCode(
-  email: string,
-  code: string
-): Promise<VerifyCodeResult> {
+export async function verifyCode(email: string, code: string) {
   try {
-    const res = await fetch(`${API_BASE}/api/verify-code`, {
+    const res = await apiFetch("/api/verify-code", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, code }),
     });
     return await res.json();
   } catch {
-    return { success: false, error: "无法连接服务器" };
+    return localVerifyCode(email, code);
   }
 }
 
-// ==================== 用户资料 API ====================
+// ==================== 用户资料 ====================
 
-function authHeaders(token: string) {
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
-  };
-}
-
-/** 获取个人资料 */
 export async function fetchProfile(token: string): Promise<UserProfile | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/user/profile`, {
-      headers: authHeaders(token),
-    });
+    const res = await apiFetch("/api/user/profile", { headers: authH(token) });
     if (!res.ok) return null;
     return await res.json();
   } catch {
-    return null;
+    return localFetchProfile();
   }
 }
 
-/** 更新个人资料 */
 export async function updateProfile(
   token: string,
   updates: { nickname?: string; qrNumber?: string; avatar?: string | null }
 ): Promise<{ error?: string; profile?: UserProfile }> {
   try {
-    const res = await fetch(`${API_BASE}/api/user/profile`, {
+    const res = await apiFetch("/api/user/profile", {
       method: "PUT",
-      headers: authHeaders(token),
+      headers: authH(token),
       body: JSON.stringify(updates),
     });
     const data = await res.json();
     if (!res.ok) return { error: data.error || "更新失败" };
     return { profile: data as UserProfile };
   } catch {
-    return { error: "无法连接服务器" };
+    return localUpdateProfile(updates);
   }
 }
 
-/** 检查 QR 号是否可用 */
-export async function checkQr(
-  token: string,
-  qrNumber: string
-): Promise<{ available: boolean; error?: string }> {
+export async function checkQr(token: string, qrNumber: string) {
   try {
-    const res = await fetch(
-      `${API_BASE}/api/user/check-qr/${encodeURIComponent(qrNumber)}`,
-      { headers: authHeaders(token) }
-    );
+    const res = await apiFetch(`/api/user/check-qr/${encodeURIComponent(qrNumber)}`, {
+      headers: authH(token),
+    });
     return await res.json();
   } catch {
-    return { available: false, error: "无法连接服务器" };
+    return localCheckQr(qrNumber);
   }
 }
 
-// ==================== 讨论社区 API ====================
+// ==================== 社区 ====================
 
-/** 获取帖子列表 */
-export async function fetchPosts(
-  page = 1,
-  size = 20
-): Promise<{ items: PostSummary[]; total: number }> {
+export async function fetchPosts(page = 1, size = 20) {
   try {
-    const res = await fetch(
-      `${API_BASE}/api/community/posts?page=${page}&size=${size}`
-    );
+    const res = await apiFetch(`/api/community/posts?page=${page}&size=${size}`);
     const data = await res.json();
     return { items: data.items || [], total: data.total || 0 };
   } catch {
-    return { items: [], total: 0 };
+    return localFetchPosts(page, size);
   }
 }
 
-/** 获取帖子详情 */
 export async function fetchPost(id: string): Promise<Post | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/community/posts/${id}`);
+    const res = await apiFetch(`/api/community/posts/${id}`);
     if (!res.ok) return null;
     return await res.json();
   } catch {
-    return null;
+    return localFetchPost(id);
   }
 }
 
-/** 发帖 */
-export async function createPost(
-  token: string,
-  title: string,
-  content: string
-): Promise<{ error?: string; post?: Post }> {
+export async function createPost(token: string, title: string, content: string) {
   try {
-    const res = await fetch(`${API_BASE}/api/community/posts`, {
+    const res = await apiFetch("/api/community/posts", {
       method: "POST",
-      headers: authHeaders(token),
+      headers: authH(token),
       body: JSON.stringify({ title, content }),
     });
     const data = await res.json();
     if (!res.ok) return { error: data.error || "发帖失败" };
     return { post: data as Post };
   } catch {
-    return { error: "无法连接服务器" };
+    return localCreatePost(title, content);
   }
 }
 
-/** 添加评论 */
-export async function addPostComment(
-  token: string,
-  postId: string,
-  content: string
-): Promise<{ error?: string; comment?: Comment }> {
+export async function addPostComment(token: string, postId: string, content: string) {
   try {
-    const res = await fetch(
-      `${API_BASE}/api/community/posts/${postId}/comments`,
-      {
-        method: "POST",
-        headers: authHeaders(token),
-        body: JSON.stringify({ content }),
-      }
-    );
+    const res = await apiFetch(`/api/community/posts/${postId}/comments`, {
+      method: "POST",
+      headers: authH(token),
+      body: JSON.stringify({ content }),
+    });
     const data = await res.json();
     if (!res.ok) return { error: data.error || "评论失败" };
     return { comment: data as Comment };
   } catch {
-    return { error: "无法连接服务器" };
+    return localAddComment(postId, content);
   }
 }

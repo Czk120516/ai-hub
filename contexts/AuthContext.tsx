@@ -14,6 +14,7 @@ import {
   updateProfile as apiUpdateProfile,
   type UserProfile,
 } from "@/lib/auth-api";
+import { localLogout } from "@/lib/local-store";
 
 interface AuthState {
   user: UserProfile | null;
@@ -57,15 +58,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       localStorage.removeItem(STORAGE_KEY);
     }
+    // 同步到 local-store 的 session（供社区/资料 API 降级使用）
+    try {
+      const authData = localStorage.getItem(STORAGE_KEY);
+      if (authData) {
+        const { user: savedUser, token: savedToken, expiresAt } = JSON.parse(authData);
+        if (expiresAt && Date.now() / 1000 < expiresAt && savedUser) {
+          localStorage.setItem("aihub_session", JSON.stringify({
+            email: savedUser.email,
+            token: savedToken,
+            expiresAt,
+          }));
+        }
+      }
+    } catch { /* ignore */ }
     setReady(true);
   }, []);
 
-  /** 保存到 localStorage */
+  /** 保存到 localStorage，同时同步到 local-store 的 session */
   const persist = useCallback((u: UserProfile, t: string, exp: number) => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ user: u, token: t, expiresAt: exp })
-    );
+    const data = { user: u, token: t, expiresAt: exp };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    // 同步到 local-store session（供社区/资料降级使用）
+    localStorage.setItem("aihub_session", JSON.stringify({
+      email: u.email,
+      token: t,
+      expiresAt: exp,
+    }));
     setUser(u);
     setToken(t);
   }, []);
@@ -118,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
+    localLogout(); // 清除 local-store session
     setUser(null);
     setToken(null);
   }, []);

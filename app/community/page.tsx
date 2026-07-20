@@ -11,7 +11,6 @@ import {
   type Post,
   type Comment,
 } from "@/lib/auth-api";
-import AuthGuard from "@/components/auth/AuthGuard";
 import AppShell from "@/components/AppShell";
 import {
   MessageSquare,
@@ -54,8 +53,8 @@ function CommunityPage() {
   }, []);
 
   useEffect(() => {
-    loadPosts(1);
-  }, [loadPosts]);
+    if (user) loadPosts(1);
+  }, [loadPosts, user]);
 
   // ===== 发帖 =====
   const handleCreate = async () => {
@@ -91,7 +90,7 @@ function CommunityPage() {
     setCommenting(true);
     const result = await addPostComment(token!, detailPost.id, commentText);
     setCommenting(false);
-    if (result.comment) {
+    if ("comment" in result && result.comment) {
       // 刷新帖子详情
       setCommentText("");
       handleViewPost(detailPost.id);
@@ -228,8 +227,19 @@ function CommunityPage() {
   return (
     <AppShell title="讨论社区" activeNav="community">
       <div className="mx-auto max-w-2xl px-4 py-4">
-        {/* 发帖入口 */}
-        {!showCreate && (
+        {/* 未登录提示 */}
+        {!user && (
+          <div className="py-16 text-center">
+            <MessageSquare className="mx-auto h-12 w-12 text-slate-300" />
+            <p className="mt-4 text-sm font-medium text-slate-500">请先登录</p>
+            <p className="mt-1 text-xs text-slate-400">
+              登录后即可浏览和参与讨论
+            </p>
+          </div>
+        )}
+
+        {/* 已登录：发帖入口 */}
+        {user && !showCreate && (
           <button
             onClick={() => setShowCreate(true)}
             className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-4 text-sm text-slate-500 transition hover:border-indigo-300 hover:text-indigo-500"
@@ -240,7 +250,7 @@ function CommunityPage() {
         )}
 
         {/* 发帖表单 */}
-        {showCreate && (
+        {user && showCreate && (
           <div className="mb-4 rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
             <h3 className="mb-3 text-sm font-semibold text-slate-700">
               发表帖子
@@ -293,14 +303,14 @@ function CommunityPage() {
         )}
 
         {/* 加载中 */}
-        {loadingPosts && posts.length === 0 && (
+        {user && loadingPosts && posts.length === 0 && (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
           </div>
         )}
 
         {/* 空状态 */}
-        {!loadingPosts && posts.length === 0 && (
+        {user && !loadingPosts && posts.length === 0 && (
           <div className="py-12 text-center">
             <MessageSquare className="mx-auto h-10 w-10 text-slate-300" />
             <p className="mt-3 text-sm text-slate-400">
@@ -310,6 +320,7 @@ function CommunityPage() {
         )}
 
         {/* 帖子列表 */}
+        {user && (
         <div className="space-y-3">
           {posts.map((post) => (
             <button
@@ -355,9 +366,10 @@ function CommunityPage() {
             </button>
           ))}
         </div>
+        )}
 
         {/* 分页 */}
-        {total > 15 && (
+        {user && total > 15 && (
           <div className="mt-6 flex justify-center gap-2">
             <button
               disabled={page === 1}
@@ -383,10 +395,4 @@ function CommunityPage() {
   );
 }
 
-export default function CommunityPageWrapper() {
-  return (
-    <AuthGuard>
-      <CommunityPage />
-    </AuthGuard>
-  );
-}
+export default CommunityPage;

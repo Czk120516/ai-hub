@@ -15,6 +15,7 @@ export default function LoginForm() {
   const [sending, setSending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [codeSent, setCodeSent] = useState(false);
+  const [localModeMsg, setLocalModeMsg] = useState("");
 
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
@@ -39,6 +40,7 @@ export default function LoginForm() {
     if (result.success) {
       setCodeSent(true);
       setCooldown(60);
+      if (result.message) setLocalModeMsg(result.message);
       // 聚焦第一个验证码输入框
       setTimeout(() => inputRefs.current[0]?.focus(), 100);
     } else {
@@ -165,6 +167,11 @@ export default function LoginForm() {
               <label className="mb-2 block text-sm font-medium text-slate-600">
                 验证码 <span className="font-normal text-slate-400">（已发送至 {email}）</span>
               </label>
+              {localModeMsg && (
+                <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  {localModeMsg}
+                </p>
+              )}
               <div className="flex justify-center gap-2">
                 {code.map((digit, i) => (
                   <input
