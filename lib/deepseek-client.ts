@@ -1,6 +1,6 @@
 import type { ChatMessage } from "./types";
 
-const API_KEY = "sk-3dcd416fa51842adae9584befc40ebb6";
+const API_KEY = process.env.DEEPSEEK_API_KEY || "";
 const BASE_URL = "https://api.deepseek.com/v1";
 const MODEL = "deepseek-chat";
 

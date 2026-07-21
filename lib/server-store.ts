@@ -31,11 +31,14 @@ function writeJSON(name: string, data: unknown) {
 
 // ===== 用户 =====
 
+export type UserRole = "user" | "developer" | "banned";
+
 export interface StoredUser {
   email: string;
   nickname: string;
   qrNumber: string;
   avatar: string | null;
+  role: UserRole;
 }
 
 export function getUsers(): Record<string, StoredUser> {
@@ -48,7 +51,8 @@ export function getUser(email: string): StoredUser | null {
 
 export function upsertUser(email: string, data: Partial<StoredUser>): StoredUser {
   const users = getUsers();
-  users[email] = { ...users[email], ...data, email };
+  const existing = users[email];
+  users[email] = { ...existing, ...data, email, role: existing?.role || data.role || "user" };
   writeJSON("users", users);
   return users[email];
 }
@@ -59,6 +63,54 @@ export function isQrTaken(qrNumber: string, excludeEmail?: string): boolean {
     if (user.qrNumber === qrNumber && email !== excludeEmail) return true;
   }
   return false;
+}
+
+/** 开发者 QR=888888 是否已被占用（含特殊保护） */
+export function isDeveloperQrClaimed(): boolean {
+  return isQrTaken("888888");
+}
+
+// ===== 管理员功能 =====
+
+export function deletePost(id: string): boolean {
+  const posts = getPosts();
+  const idx = posts.findIndex((p) => p.id === id);
+  if (idx === -1) return false;
+  posts.splice(idx, 1);
+  writeJSON("posts", posts);
+  return true;
+}
+
+export function deleteComment(postId: string, commentId: string): boolean {
+  const posts = getPosts();
+  const post = posts.find((p) => p.id === postId);
+  if (!post) return false;
+  const idx = post.comments.findIndex((c) => c.id === commentId);
+  if (idx === -1) return false;
+  post.comments.splice(idx, 1);
+  writeJSON("posts", posts);
+  return true;
+}
+
+export function banUser(email: string): boolean {
+  const users = getUsers();
+  if (!users[email]) return false;
+  if (users[email].role === "developer") return false; // 不能封禁开发者
+  users[email].role = "banned";
+  writeJSON("users", users);
+  return true;
+}
+
+export function unbanUser(email: string): boolean {
+  const users = getUsers();
+  if (!users[email]) return false;
+  users[email].role = "user";
+  writeJSON("users", users);
+  return true;
+}
+
+export function getAllUsers(): StoredUser[] {
+  return Object.values(getUsers());
 }
 
 // ===== 帖子 =====

@@ -11,6 +11,7 @@ export interface UserProfile {
   nickname: string;
   qrNumber: string;
   avatar: string | null;
+  role: "user" | "developer" | "banned";
 }
 
 export interface PostSummary {
@@ -43,6 +44,7 @@ interface StoredUser {
   nickname: string;
   qrNumber: string;
   avatar: string | null;
+  role: "user" | "developer" | "banned";
 }
 
 interface StoredSession {
@@ -175,7 +177,20 @@ export function localVerifyCode(
       nickname: defaultNickname(email),
       qrNumber: qr,
       avatar: null,
+      role: "user",
     };
+    users[email] = user;
+    saveUsers(users);
+  }
+
+  // 检查是否被禁
+  if (user.role === "banned") {
+    return { success: false, error: "您的账号已被封禁" };
+  }
+
+  // QR=888888 自动提升为开发者
+  if (user.qrNumber === "888888" && user.role !== "developer") {
+    user.role = "developer";
     users[email] = user;
     saveUsers(users);
   }
@@ -191,6 +206,7 @@ export function localVerifyCode(
       nickname: user.nickname,
       qrNumber: user.qrNumber,
       avatar: user.avatar,
+      role: user.role,
     },
   };
 }
@@ -219,7 +235,7 @@ export function localFetchProfile(): UserProfile | null {
   const users = getUsers();
   const u = users[email];
   if (!u) return null;
-  return { email: u.email, nickname: u.nickname, qrNumber: u.qrNumber, avatar: u.avatar };
+  return { email: u.email, nickname: u.nickname, qrNumber: u.qrNumber, avatar: u.avatar, role: u.role };
 }
 
 /** 更新个人资料 */
@@ -244,8 +260,17 @@ export function localUpdateProfile(updates: {
   if (updates.qrNumber !== undefined) {
     const qr = updates.qrNumber.toUpperCase();
     if (!/^[A-Z0-9]{6,12}$/.test(qr)) return { error: "QR 号需为 6-12 位字母或数字" };
-    const qrSet = getQRSet();
-    if (qrSet.has(qr) && qr !== user.qrNumber) return { error: "该 QR 号已被占用" };
+    // QR=888888 开发者专属（已占用就不让设）
+    if (qr === "888888") {
+      const qrSet = getQRSet();
+      if (qrSet.has("888888") && user.qrNumber !== "888888") {
+        return { error: "该 QR 号已被占用" };
+      }
+      user.role = "developer"; // 设为 888888 自动成为开发者
+    } else {
+      const qrSet = getQRSet();
+      if (qrSet.has(qr) && qr !== user.qrNumber) return { error: "该 QR 号已被占用" };
+    }
     user.qrNumber = qr;
   }
 
@@ -262,6 +287,7 @@ export function localUpdateProfile(updates: {
       nickname: user.nickname,
       qrNumber: user.qrNumber,
       avatar: user.avatar,
+      role: user.role,
     },
   };
 }

@@ -128,6 +128,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           stored.user = result.profile;
           localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
         } catch { /* ignore */ }
+        // 如果更新了 QR 号（比如设成了 888888），需要重新登录以获得新 role
+        if (updates.qrNumber) {
+          return { error: undefined, needRelogin: true };
+        }
         return {};
       }
       return { error: result.error || "更新失败" };

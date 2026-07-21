@@ -8,8 +8,10 @@ import nodemailer from "nodemailer";
 import { signToken, verifyToken, type JWTPayload } from "@/lib/jwt";
 import {
   getUser, upsertUser, isQrTaken, getPosts, addPost, getPost, addComment, otpStore,
+  deletePost, deleteComment, banUser, unbanUser, getAllUsers, isDeveloperQrClaimed,
   type StoredPost, type StoredComment,
 } from "@/lib/server-store";
+import { rateLimit, getClientIP } from "@/lib/rate-limit";
 
 // ===== 常量 =====
 
@@ -84,6 +86,20 @@ class AuthError extends Error {
   constructor(msg: string, status: number) { super(msg); this.status = status; }
 }
 
+class BanError extends Error {
+  status: number;
+  constructor(msg: string) { super(msg); this.status = 403; }
+}
+
+function requireAdmin(req: NextRequest): JWTPayload {
+  const user = authRequired(req);
+  // 实时查库获取最新 role
+  const stored = getUser(user.email);
+  const role = stored?.role || "user";
+  if (role !== "developer") throw new AuthError("需要开发者权限", 403);
+  return { ...user, role };
+}
+
 // ===== 主处理器 =====
 
 export async function GET(req: NextRequest, { params }: { params: { path: string[] } }) {
@@ -102,15 +118,33 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
   const route = "/" + path.join("/");
   const body = method !== "GET" ? await req.json().catch(() => ({})) : {};
 
+  // ===== DDoS 防护：全局限流 =====
+  const clientIP = getClientIP(req);
+  const globalLimit = rateLimit(`global:${clientIP}`, 120, 60_000); // 每 IP 每分钟 120 请求
+  if (!globalLimit.allowed) {
+    return NextResponse.json(
+      { error: "请求过于频繁，请稍后再试" },
+      { status: 429, headers: { "Retry-After": String(Math.ceil((globalLimit.resetAt - Date.now()) / 1000)) } }
+    );
+  }
+
   try {
     // ---- 健康检查 ----
     if (route === "/health" && method === "GET") return json({ ok: true });
 
-    // ---- 发送验证码 ----
-    if (route === "/send-code" && method === "POST") return handleSendCode(body);
+    // ---- 发送验证码（严格限流） ----
+    if (route === "/send-code" && method === "POST") {
+      const codeLimit = rateLimit(`send-code:${clientIP}`, 5, 60_000); // 每 IP 每分钟 5 次
+      if (!codeLimit.allowed) return error("请求过于频繁，请稍后再试", 429);
+      return handleSendCode(body);
+    }
 
     // ---- 验证码校验 ----
-    if (route === "/verify-code" && method === "POST") return handleVerifyCode(body);
+    if (route === "/verify-code" && method === "POST") {
+      const verifyLimit = rateLimit(`verify:${clientIP}`, 10, 60_000);
+      if (!verifyLimit.allowed) return error("请求过于频繁，请稍后再试", 429);
+      return handleVerifyCode(body);
+    }
 
     // ---- 用户资料 ----
     if (route === "/user/profile" && method === "GET") return handleGetProfile(req);
@@ -123,22 +157,44 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
 
     // ---- 帖子列表/发帖 ----
     if (route === "/community/posts" && method === "GET") return handleGetPosts(req);
-    if (route === "/community/posts" && method === "POST") return handleCreatePost(req, body);
+    if (route === "/community/posts" && method === "POST") {
+      const postLimit = rateLimit(`post:${clientIP}`, 10, 60_000); // 每 IP 每分钟 10 篇帖子
+      if (!postLimit.allowed) return error("发帖过于频繁，请稍后再试", 429);
+      return handleCreatePost(req, body);
+    }
 
     // ---- 帖子详情 ----
     if (path[0] === "community" && path[1] === "posts" && path.length === 3 && method === "GET") {
       return handleGetPost(path[2]);
     }
 
+    // ---- 删除帖子（管理员） ----
+    if (path[0] === "community" && path[1] === "posts" && path.length === 3 && method === "DELETE") {
+      return handleDeletePost(req, path[2]);
+    }
+
     // ---- 添加评论 ----
     if (path[0] === "community" && path[1] === "posts" && path[3] === "comments" && method === "POST") {
+      const commentLimit = rateLimit(`comment:${clientIP}`, 20, 60_000); // 每 IP 每分钟 20 条评论
+      if (!commentLimit.allowed) return error("评论过于频繁，请稍后再试", 429);
       return handleAddComment(req, body, path[2]);
     }
+
+    // ---- 删除评论（管理员） ----
+    if (path[0] === "community" && path[1] === "posts" && path[3] === "comments" && path.length === 5 && method === "DELETE") {
+      return handleDeleteComment(req, path[2], path[4]);
+    }
+
+    // ---- 管理员：封禁/解封用户 ----
+    if (path[0] === "admin" && path[1] === "ban" && method === "POST") return handleBanUser(req, body);
+    if (path[0] === "admin" && path[1] === "unban" && method === "POST") return handleUnbanUser(req, body);
+    if (path[0] === "admin" && path[1] === "users" && method === "GET") return handleListUsers(req);
 
     return error("Not found", 404);
 
   } catch (e) {
     if (e instanceof AuthError) return error(e.message, e.status);
+    if (e instanceof BanError) return error(e.message, e.status);
     console.error("API Error:", e);
     return error("服务器内部错误", 500);
   }
@@ -200,34 +256,46 @@ function handleVerifyCode(body: { email?: string; code?: string }) {
   otpStore.delete(email);
 
   const existing = getUser(email);
+  if (existing?.role === "banned") return error("您的账号已被封禁", 403);
+
+  // 确定角色：QR=888888 的自动成为开发者，被禁用户不能登录
+  let role: "user" | "developer" = existing?.role === "developer" ? "developer" : "user";
+  // 如果用户当前 QR 是 888888，自动提升为开发者
+  if (existing?.qrNumber === "888888") role = "developer";
+
   const user = upsertUser(email, {
     nickname: existing?.nickname || defaultNickname(email),
     qrNumber: existing?.qrNumber || generateQR(),
     avatar: existing?.avatar || null,
+    role,
   });
 
   const token = signToken({
     email: user.email,
     nickname: user.nickname,
     qrNumber: user.qrNumber,
+    role: user.role,
   });
 
   return json({
     success: true,
     token,
     expiresAt: Math.floor(Date.now() / 1000) + 7 * 24 * 3600,
-    user: { email: user.email, nickname: user.nickname, qrNumber: user.qrNumber, avatar: user.avatar },
+    user: { email: user.email, nickname: user.nickname, qrNumber: user.qrNumber, avatar: user.avatar, role: user.role },
   });
 }
 
 function handleGetProfile(req: NextRequest) {
   const u = authRequired(req);
   const user = getUser(u.email);
-  return json(user || u);
+  if (!user) return json(u);
+  return json({ email: user.email, nickname: user.nickname, qrNumber: user.qrNumber, avatar: user.avatar, role: user.role });
 }
 
 function handleUpdateProfile(req: NextRequest, body: { nickname?: string; qrNumber?: string; avatar?: string | null }) {
   const u = authRequired(req);
+  const stored = getUser(u.email);
+  if (stored?.role === "banned") throw new BanError("您的账号已被封禁，无法修改资料");
 
   if (body.nickname !== undefined) {
     if (typeof body.nickname !== "string" || body.nickname.trim().length < 1 || body.nickname.trim().length > 20)
@@ -236,17 +304,29 @@ function handleUpdateProfile(req: NextRequest, body: { nickname?: string; qrNumb
   if (body.qrNumber !== undefined) {
     if (!/^[A-Z0-9]{6,12}$/i.test(body.qrNumber))
       return error("QR 号需为 6-12 位字母或数字");
-    if (isQrTaken(body.qrNumber.toUpperCase(), u.email))
+    // QR=888888 是开发者专属，只有第一个认领的人可以设置
+    if (body.qrNumber.toUpperCase() === "888888") {
+      if (isDeveloperQrClaimed() && stored?.qrNumber !== "888888") {
+        return error("该 QR 号已被占用");
+      }
+    } else if (isQrTaken(body.qrNumber.toUpperCase(), u.email)) {
       return error("该 QR 号已被占用");
+    }
   }
 
   const updates: Record<string, unknown> = {};
   if (body.nickname !== undefined) updates.nickname = body.nickname.trim();
-  if (body.qrNumber !== undefined) updates.qrNumber = body.qrNumber.toUpperCase();
+  if (body.qrNumber !== undefined) {
+    updates.qrNumber = body.qrNumber.toUpperCase();
+    // 设置 QR=888888 自动成为开发者
+    if (body.qrNumber.toUpperCase() === "888888") {
+      updates.role = "developer";
+    }
+  }
   if (body.avatar !== undefined) updates.avatar = body.avatar;
 
   const updated = upsertUser(u.email, updates);
-  return json(updated);
+  return json({ email: updated.email, nickname: updated.nickname, qrNumber: updated.qrNumber, avatar: updated.avatar, role: updated.role });
 }
 
 function handleCheckQR(req: NextRequest, qr: string | undefined) {
@@ -277,6 +357,12 @@ function handleGetPosts(req: NextRequest) {
 function handleCreatePost(req: NextRequest, body: { title?: string; content?: string }) {
   const u = authRequired(req);
   const { title, content } = body;
+  // 实时查库获取最新用户信息（昵称、头像等）
+  const stored = getUser(u.email);
+  if (stored?.role === "banned") throw new BanError("您的账号已被封禁，无法发帖");
+  const authorNickname = stored?.nickname || u.nickname;
+  const authorQr = stored?.qrNumber || u.qrNumber;
+  const authorAvatar = stored?.avatar || null;
 
   if (!title || typeof title !== "string" || title.trim().length < 1 || title.trim().length > 100)
     return error("标题 1-100 个字符");
@@ -288,9 +374,9 @@ function handleCreatePost(req: NextRequest, body: { title?: string; content?: st
     title: title.trim(),
     content: content.trim(),
     authorEmail: u.email,
-    authorNickname: u.nickname,
-    authorQr: u.qrNumber,
-    authorAvatar: null, // will be retrieved from user store
+    authorNickname,
+    authorQr,
+    authorAvatar,
     createdAt: new Date().toISOString(),
     comments: [],
   };
@@ -308,6 +394,12 @@ function handleGetPost(id: string) {
 function handleAddComment(req: NextRequest, body: { content?: string }, postId: string) {
   const u = authRequired(req);
   const { content } = body;
+  // 实时查库获取最新用户信息
+  const stored = getUser(u.email);
+  if (stored?.role === "banned") throw new BanError("您的账号已被封禁，无法评论");
+  const authorNickname = stored?.nickname || u.nickname;
+  const authorQr = stored?.qrNumber || u.qrNumber;
+  const authorAvatar = stored?.avatar || null;
 
   if (!content || typeof content !== "string" || content.trim().length < 1 || content.trim().length > 2000)
     return error("评论 1-2000 个字符");
@@ -316,13 +408,62 @@ function handleAddComment(req: NextRequest, body: { content?: string }, postId: 
     id: crypto.randomBytes(8).toString("hex"),
     content: content.trim(),
     authorEmail: u.email,
-    authorNickname: u.nickname,
-    authorQr: u.qrNumber,
-    authorAvatar: null,
+    authorNickname,
+    authorQr,
+    authorAvatar,
     createdAt: new Date().toISOString(),
   };
 
   const result = addComment(postId, comment);
   if (!result) return error("帖子不存在", 404);
   return json(comment);
+}
+
+// ===== 管理员功能 =====
+
+function handleDeletePost(req: NextRequest, postId: string) {
+  const admin = requireAdmin(req);
+  const post = getPost(postId);
+  if (!post) return error("帖子不存在", 404);
+  deletePost(postId);
+  return json({ success: true, message: "帖子已删除" });
+}
+
+function handleDeleteComment(req: NextRequest, postId: string, commentId: string) {
+  requireAdmin(req);
+  const success = deleteComment(postId, commentId);
+  if (!success) return error("帖子或评论不存在", 404);
+  return json({ success: true, message: "评论已删除" });
+}
+
+function handleBanUser(req: NextRequest, body: { email?: string }) {
+  requireAdmin(req);
+  const { email } = body;
+  if (!email || !email.includes("@")) return error("请输入有效的邮箱地址");
+  const success = banUser(email);
+  if (!success) return error("封禁失败，用户不存在或是开发者", 400);
+  return json({ success: true, message: "用户已封禁" });
+}
+
+function handleUnbanUser(req: NextRequest, body: { email?: string }) {
+  requireAdmin(req);
+  const { email } = body;
+  if (!email || !email.includes("@")) return error("请输入有效的邮箱地址");
+  const success = unbanUser(email);
+  if (!success) return error("解封失败，用户不存在", 400);
+  return json({ success: true, message: "用户已解封" });
+}
+
+function handleListUsers(req: NextRequest) {
+  requireAdmin(req);
+  const users = getAllUsers();
+  return json({
+    users: users.map((u) => ({
+      email: u.email,
+      nickname: u.nickname,
+      qrNumber: u.qrNumber,
+      avatar: u.avatar,
+      role: u.role,
+    })),
+  });
 }

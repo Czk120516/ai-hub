@@ -35,11 +35,14 @@ function write<T>(name: string, data: T) {
 
 // ========== 用户存储 ==========
 
+export type UserRole = "user" | "developer" | "banned";
+
 export interface StoredUser {
   email: string;
   nickname: string;
   qrNumber: string;
   avatar: string | null;
+  role: UserRole;
 }
 
 export function getUsers(): Record<string, StoredUser> {
@@ -56,7 +59,8 @@ export function getUser(email: string): StoredUser | null {
 
 export function upsertUser(email: string, data: Partial<StoredUser>): StoredUser {
   const users = getUsers();
-  users[email] = { ...users[email], ...data, email };
+  const existing = users[email];
+  users[email] = { ...existing, ...data, email, role: existing?.role || data.role || "user" };
   saveUsers(users);
   return users[email];
 }
@@ -69,6 +73,50 @@ export function isQrTaken(qrNumber: string, excludeEmail?: string): boolean {
     }
   }
   return false;
+}
+
+export function deletePost(id: string): boolean {
+  const posts = getPosts();
+  const idx = posts.findIndex((p) => p.id === id);
+  if (idx === -1) return false;
+  posts.splice(idx, 1);
+  savePosts(posts);
+  return true;
+}
+
+export function deleteComment(postId: string, commentId: string): boolean {
+  const posts = getPosts();
+  const post = posts.find((p) => p.id === postId);
+  if (!post) return false;
+  const idx = post.comments.findIndex((c) => c.id === commentId);
+  if (idx === -1) return false;
+  post.comments.splice(idx, 1);
+  savePosts(posts);
+  return true;
+}
+
+export function banUser(email: string): boolean {
+  const users = getUsers();
+  if (!users[email]) return false;
+  if (users[email].role === "developer") return false;
+  users[email].role = "banned";
+  saveUsers(users);
+  return true;
+}
+
+export function unbanUser(email: string): boolean {
+  const users = getUsers();
+  if (!users[email]) return false;
+  users[email].role = "user";
+  saveUsers(users);
+  return true;
+}
+
+export function getBannedUsers(): string[] {
+  const users = getUsers();
+  return Object.entries(users)
+    .filter(([, u]) => u.role === "banned")
+    .map(([email]) => email);
 }
 
 // ========== 帖子存储 ==========

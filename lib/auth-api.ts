@@ -38,6 +38,7 @@ export interface UserProfile {
   nickname: string;
   qrNumber: string;
   avatar: string | null;
+  role: "user" | "developer" | "banned";
 }
 
 export interface PostSummary {
@@ -186,5 +187,68 @@ export async function addPostComment(token: string, postId: string, content: str
     return { comment: data as Comment };
   } catch {
     return localAddComment(postId, content);
+  }
+}
+
+// ==================== 管理员功能 ====================
+
+export async function adminDeletePost(token: string, postId: string) {
+  try {
+    const res = await apiFetch(`/api/community/posts/${postId}`, {
+      method: "DELETE",
+      headers: authH(token),
+    });
+    return await res.json();
+  } catch {
+    return { error: "网络错误" };
+  }
+}
+
+export async function adminDeleteComment(token: string, postId: string, commentId: string) {
+  try {
+    const res = await apiFetch(`/api/community/posts/${postId}/comments/${commentId}`, {
+      method: "DELETE",
+      headers: authH(token),
+    });
+    return await res.json();
+  } catch {
+    return { error: "网络错误" };
+  }
+}
+
+export async function adminBanUser(token: string, email: string) {
+  try {
+    const res = await apiFetch("/api/admin/ban", {
+      method: "POST",
+      headers: authH(token),
+      body: JSON.stringify({ email }),
+    });
+    return await res.json();
+  } catch {
+    return { error: "网络错误" };
+  }
+}
+
+export async function adminUnbanUser(token: string, email: string) {
+  try {
+    const res = await apiFetch("/api/admin/unban", {
+      method: "POST",
+      headers: authH(token),
+      body: JSON.stringify({ email }),
+    });
+    return await res.json();
+  } catch {
+    return { error: "网络错误" };
+  }
+}
+
+export async function adminListUsers(token: string): Promise<{ users?: UserProfile[]; error?: string }> {
+  try {
+    const res = await apiFetch("/api/admin/users", {
+      headers: authH(token),
+    });
+    return await res.json();
+  } catch {
+    return { error: "网络错误" };
   }
 }

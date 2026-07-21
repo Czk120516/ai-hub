@@ -4,10 +4,10 @@ import { useState, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { checkQr } from "@/lib/auth-api";
 import AppShell from "@/components/AppShell";
-import { Camera, Check, X, Pencil, User } from "lucide-react";
+import { Camera, Check, X, Pencil, User, Shield } from "lucide-react";
 
 function ProfilePage() {
-  const { user, token, updateProfile } = useAuth();
+  const { user, token, updateProfile, signOut } = useAuth();
 
   const [editingNickname, setEditingNickname] = useState(false);
   const [editingQr, setEditingQr] = useState(false);
@@ -111,7 +111,18 @@ function ProfilePage() {
     if (updateResult.error) setError(updateResult.error);
     else {
       setEditingQr(false);
-      showMsg("QR 号已更新");
+      // 如果设成了开发者 QR，提示重新登录
+      if (qrNumber === "888888") {
+        setError("");
+        showMsg("QR 号已更新！正在刷新权限...");
+        setTimeout(() => {
+          if (confirm("您已将 QR 设置为开发者号 888888，需要重新登录以获取开发者权限。是否现在重新登录？")) {
+            signOut();
+          }
+        }, 1500);
+      } else {
+        showMsg("QR 号已更新");
+      }
     }
   };
 
@@ -184,6 +195,18 @@ function ProfilePage() {
               </button>
             )}
           </div>
+          {user?.role === "developer" && (
+            <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1">
+              <Shield className="h-3 w-3 text-amber-600" />
+              <span className="text-xs font-semibold text-amber-700">开发者</span>
+            </div>
+          )}
+          {user?.role === "banned" && (
+            <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-rose-100 px-3 py-1">
+              <X className="h-3 w-3 text-rose-600" />
+              <span className="text-xs font-semibold text-rose-700">已封禁</span>
+            </div>
+          )}
           <p className="mt-1 text-xs text-slate-400">支持 JPG/PNG，不超过 2MB</p>
         </div>
 

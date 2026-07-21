@@ -21,6 +21,7 @@ export interface JWTPayload {
   email: string;
   nickname: string;
   qrNumber: string;
+  role: "user" | "developer" | "banned";
   exp: number;
   iat: number;
 }
