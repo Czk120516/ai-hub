@@ -9,6 +9,7 @@
   SMTP_USER = "16690511701@163.com"
   SMTP_FROM = "16690511701@163.com"
   SMTP_FROM_NAME = "AI Hub"
+  JWT_KEY = "aihub-jwt-secret-prod-2026"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
