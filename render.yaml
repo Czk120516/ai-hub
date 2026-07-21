@@ -1,19 +1,23 @@
 services:
   - type: web
     name: ai-hub
-    env: node
+    runtime: node
+    plan: free
     buildCommand: npm install && npm run build
-    startCommand: npm start
+    startCommand: npm run start
+    autoDeploy: true
     envVars:
       - key: DEEPSEEK_API_KEY
         sync: false
+      - key: JWT_SECRET
+        value: aihub-jwt-secret-prod-2026
       - key: SMTP_HOST
-        sync: false
+        value: smtp.163.com
       - key: SMTP_PORT
-        sync: false
+        value: "465"
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASS
         sync: false
       - key: FROM_NAME
-        sync: false
+        value: AI Hub
