@@ -4,6 +4,11 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  SMTP_HOST = "smtp.163.com"
+  SMTP_PORT = "465"
+  SMTP_USER = "16690511701@163.com"
+  SMTP_FROM = "16690511701@163.com"
+  SMTP_FROM_NAME = "AI Hub"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
