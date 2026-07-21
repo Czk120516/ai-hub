@@ -182,8 +182,9 @@ async function handleSendCode(body: { email?: string }) {
   } catch (err: unknown) {
     otpStore.delete(email);
     const msg = err instanceof Error ? err.message : "Unknown error";
-    console.error("Send email failed:", msg);
-    return error("邮件发送失败，请稍后重试", 500);
+    const stack = err instanceof Error ? (err.stack || "").slice(0, 500) : "";
+    console.error("Send email failed:", msg, stack);
+    return error(`邮件发送失败: ${msg}`, 500);
   }
 }
 
