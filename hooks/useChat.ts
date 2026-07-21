@@ -2,7 +2,30 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { Message, ChatMessage, Capability } from "@/lib/types";
-import { directStreamDeepSeek } from "@/lib/deepseek-client";
+
+/**
+ * 通过服务端 API 代理调用 DeepSeek（API Key 仅服务端，前端不接触）
+ */
+async function fetchChatStream(
+  apiMessages: ChatMessage[],
+  temperature: number,
+  signal: AbortSignal,
+): Promise<ReadableStream<Uint8Array>> {
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages: apiMessages, temperature }),
+    signal,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`AI 服务错误 (${res.status}): ${text || res.statusText}`);
+  }
+
+  if (!res.body) throw new Error("AI 服务未返回响应");
+  return res.body;
+}
 
 export function useChat(capability: Capability) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -57,11 +80,11 @@ export function useChat(capability: Capability) {
       abortRef.current = controller;
 
       try {
-        const stream = await directStreamDeepSeek({
-          messages: apiMessages,
-          temperature: capability.temperature ?? 0.7,
-          signal: controller.signal,
-        });
+        const stream = await fetchChatStream(
+          apiMessages,
+          capability.temperature ?? 0.7,
+          controller.signal,
+        );
 
         const reader = stream.getReader();
         const decoder = new TextDecoder();

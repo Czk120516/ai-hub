@@ -12,6 +12,7 @@ import {
   type StoredPost, type StoredComment,
 } from "@/lib/server-store";
 import { rateLimit, getClientIP } from "@/lib/rate-limit";
+import { streamDeepSeekChat } from "@/lib/deepseek";
 
 // ===== 常量 =====
 
@@ -131,6 +132,9 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
   try {
     // ---- 健康检查 ----
     if (route === "/health" && method === "GET") return json({ ok: true });
+
+    // ---- Chat 代理（服务端代理 DeepSeek，保护 API Key） ----
+    if (route === "/chat" && method === "POST") return handleChat(req, body);
 
     // ---- 发送验证码（严格限流） ----
     if (route === "/send-code" && method === "POST") {
@@ -466,4 +470,34 @@ function handleListUsers(req: NextRequest) {
       role: u.role,
     })),
   });
+}
+
+// ===== Chat 代理（服务端调用 DeepSeek，前端不接触 API Key） =====
+
+async function handleChat(req: NextRequest, body: { messages?: ChatMessage[]; temperature?: number }) {
+  const { messages = [], temperature = 0.7 } = body;
+
+  if (!messages.length) return error("缺少 messages 参数", 400);
+
+  try {
+    const stream = await streamDeepSeekChat({ messages, temperature });
+
+    // 返回流式响应：text/plain 逐 token
+    return new NextResponse(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  } catch (e) {
+    console.error("Chat error:", e);
+    return error(e instanceof Error ? e.message : "AI 服务异常", 500);
+  }
+}
+
+// ChatMessage 类型（与 types.ts 一致）
+interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
 }
