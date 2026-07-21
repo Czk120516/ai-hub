@@ -4,7 +4,7 @@
  */
 import crypto from "crypto";
 
-const SECRET = process.env.JWT_KEY || "aihub-default-key-change-me";
+const SECRET = process.env.JWT_SECRET || "aihub-jwt-secret-prod-2026";
 const TOKEN_EXPIRE = 7 * 24 * 3600; // 7 天
 
 function base64url(str: string) {
