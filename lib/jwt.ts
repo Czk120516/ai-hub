@@ -5,12 +5,13 @@
 import crypto from "crypto";
 
 // 优先级：JWT_SECRET > JWT_KEY (Netlify) > 默认值
-const SECRET = process.env.JWT_SECRET || process.env.JWT_KEY || "aihub-jwt-secret-prod-2026";
+const SECRET = process.env.JWT_SECRET || process.env.JWT_KEY || "aihub-default-secret-change-me";
 const TOKEN_EXPIRE = 7 * 24 * 3600; // 7 天
 
 // 旧版 secret 列表 — 新版本仍能验证旧版本签发的 token
 const LEGACY_SECRETS: string[] = [
   "aihub-default-secret-change-me",
+  "aihub-jwt-secret-prod-2026",
 ];
 
 function base64url(str: string) {
