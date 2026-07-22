@@ -1,0 +1,11 @@
+name = "ai-hub"
+pages_build_output_dir = ".vercel/output/static"
+compatibility_date = "2025-07-22"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+SMTP_HOST = "smtp.163.com"
+SMTP_PORT = "465"
+SMTP_USER = "16690511701@163.com"
+
+# Secrets (SMTP_PASS, DEEPSEEK_API_KEY) are set in Cloudflare Pages dashboard environment variables
