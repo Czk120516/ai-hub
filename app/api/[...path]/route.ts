@@ -445,10 +445,10 @@ function handleVerifyCode(body: { email?: string; code?: string }) {
   const existing = getUser(email);
   if (existing?.role === "banned") return error("您的账号已被封禁", 403);
 
-  // 确定角色：QR=888888 的自动成为开发者，被禁用户不能登录
+  // 确定角色：QR=88888888 的自动成为开发者，被禁用户不能登录
   let role: "user" | "developer" = existing?.role === "developer" ? "developer" : "user";
-  // 如果用户当前 QR 是 888888，自动提升为开发者
-  if (existing?.qrNumber === "888888") role = "developer";
+  // 如果用户当前 QR 是 88888888，自动提升为开发者
+  if (existing?.qrNumber === "88888888") role = "developer";
 
   const user = upsertUser(email, {
     nickname: existing?.nickname || defaultNickname(email),
@@ -491,9 +491,9 @@ function handleUpdateProfile(req: NextRequest, body: { nickname?: string; qrNumb
   if (body.qrNumber !== undefined) {
     if (!/^[A-Z0-9]{6,12}$/i.test(body.qrNumber))
       return error("QR 号需为 6-12 位字母或数字");
-    // QR=888888 是开发者专属，只有第一个认领的人可以设置
-    if (body.qrNumber.toUpperCase() === "888888") {
-      if (isDeveloperQrClaimed() && stored?.qrNumber !== "888888") {
+    // QR=88888888 是开发者专属，只有第一个认领的人可以设置
+    if (body.qrNumber.toUpperCase() === "88888888") {
+      if (isDeveloperQrClaimed() && stored?.qrNumber !== "88888888") {
         return error("该 QR 号已被占用");
       }
     } else if (isQrTaken(body.qrNumber.toUpperCase(), u.email)) {
@@ -505,8 +505,8 @@ function handleUpdateProfile(req: NextRequest, body: { nickname?: string; qrNumb
   if (body.nickname !== undefined) updates.nickname = body.nickname.trim();
   if (body.qrNumber !== undefined) {
     updates.qrNumber = body.qrNumber.toUpperCase();
-    // 设置 QR=888888 自动成为开发者
-    if (body.qrNumber.toUpperCase() === "888888") {
+    // 设置 QR=88888888 自动成为开发者
+    if (body.qrNumber.toUpperCase() === "88888888") {
       updates.role = "developer";
     }
   }
