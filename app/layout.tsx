@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { LocationProvider } from "@/contexts/LocationContext";
 
 export const metadata: Metadata = {
   title: "AI 能力聚合站 · DeepSeek",
@@ -22,7 +23,9 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <LocationProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </LocationProvider>
       </body>
     </html>
   );
