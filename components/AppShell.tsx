@@ -9,7 +9,7 @@ import {
   MessageCircle,
   Users,
   User,
-  Activity,
+  Settings,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -17,7 +17,7 @@ import Link from "next/link";
 interface AppShellProps {
   children: ReactNode;
   title: string;
-  activeNav: "chat" | "community" | "profile" | "server";
+  activeNav: "chat" | "community" | "profile" | "server" | "admin";
 }
 
 export default function AppShell({ children, title, activeNav }: AppShellProps) {
@@ -32,7 +32,7 @@ export default function AppShell({ children, title, activeNav }: AppShellProps) 
     { id: "profile", label: "个人主页", icon: User, href: "/profile" },
   ];
   if (isDeveloper) {
-    navItems.push({ id: "server", label: "服务器运行状况", icon: Activity, href: "/server-status" });
+    navItems.push({ id: "admin", label: "管理面板", icon: Settings, href: "/admin" });
   }
 
   const closeMobile = () => setMobileOpen(false);
