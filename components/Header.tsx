@@ -48,8 +48,15 @@ export default function Header({ capability, onClear, canClear, isStreaming, onM
           <h1 className="truncate text-sm font-semibold leading-tight text-slate-900 sm:text-base">
             AI 能力聚合站
           </h1>
-          <p className="truncate text-[11px] text-slate-500 sm:text-xs">
-            当前能力 · <span className="font-medium text-indigo-600">{capability.name}</span>
+          <p className="flex items-center gap-1.5 truncate text-[11px] text-slate-500 sm:text-xs">
+            <span>
+              当前能力 · <span className="font-medium text-indigo-600">{capability.name}</span>
+            </span>
+            {capability.model && (
+              <span className="inline-flex shrink-0 items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-amber-200">
+                {capability.model} 驱动
+              </span>
+            )}
           </p>
         </div>
       </div>
