@@ -87,16 +87,21 @@ export function useChat(capability: Capability) {
         } catch {
           status = null;
         }
-        if (!status) {
-          setError("无法获取服务器运行指标（需开发者权限，或网络异常）");
-          return;
+        if (status) {
+          const metrics = JSON.stringify(status, null, 2);
+          systemPrompt =
+            systemPrompt +
+            "\n\n【服务器实时运行指标（最新）】\n" +
+            metrics +
+            "\n\n请严格基于以上真实数据作答，不要编造数据以外的内容。";
+        } else {
+          // 放宽：拉取失败不阻断对话，让模型如实说明未能获取实时指标
+          systemPrompt =
+            systemPrompt +
+            "\n\n（注：本次请求未能实时连接服务器获取运行指标，可能是网络或部署原因。" +
+            "请如实告诉用户「暂时未能获取到服务器实时指标，请稍后重试」，不要编造数据，" +
+            "也不要声称自己能/不能访问服务器——只需说明当前数据缺失即可。）";
         }
-        const metrics = JSON.stringify(status, null, 2);
-        systemPrompt =
-          systemPrompt +
-          "\n\n【服务器实时运行指标（最新）】\n" +
-          metrics +
-          "\n\n请严格基于以上真实数据作答，不要编造数据以外的内容。";
       }
 
       const apiMessages: ChatMessage[] = [
