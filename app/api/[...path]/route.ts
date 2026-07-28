@@ -61,10 +61,10 @@ function defaultNickname(email: string) {
   return email.split("@")[0].slice(0, 12);
 }
 
-/** 登录邮箱命中 DEV_EMAIL 即视为开发者（不受 /tmp 清空影响） */
+/** 登录邮箱命中 DEV_EMAIL 即视为开发者（不受 /tmp 清空影响）。
+ *  未配置环境变量时回退到硬编码兜底邮箱，省去在 Vercel 手动设变量的步骤。 */
 function isDevEmail(email: string): boolean {
-  const dev = process.env.DEV_EMAIL;
-  if (!dev) return false;
+  const dev = process.env.DEV_EMAIL || "16690511701@163.com";
   return String(email).toLowerCase() === dev.toLowerCase();
 }
 
