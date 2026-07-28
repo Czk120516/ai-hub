@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { Message, ChatMessage, Capability } from "@/lib/types";
+import { useLocation, type BestLocation } from "@/contexts/LocationContext";
 
 /**
  * 通过服务端 API 代理调用 DeepSeek（API Key 仅服务端，前端不接触）
@@ -10,11 +11,16 @@ async function fetchChatStream(
   apiMessages: ChatMessage[],
   temperature: number,
   signal: AbortSignal,
+  loc: BestLocation | null,
 ): Promise<ReadableStream<Uint8Array>> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages: apiMessages, temperature }),
+    body: JSON.stringify({
+      messages: apiMessages,
+      temperature,
+      ...(loc ? { lat: loc.lat, lng: loc.lng, locName: loc.city, locSource: loc.source } : {}),
+    }),
     signal,
   });
 
@@ -28,6 +34,7 @@ async function fetchChatStream(
 }
 
 export function useChat(capability: Capability) {
+  const { getBest } = useLocation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingId, setStreamingId] = useState<string | null>(null);
@@ -80,10 +87,12 @@ export function useChat(capability: Capability) {
       abortRef.current = controller;
 
       try {
+        const loc = getBest();
         const stream = await fetchChatStream(
           apiMessages,
           capability.temperature ?? 0.7,
           controller.signal,
+          loc,
         );
 
         const reader = stream.getReader();
@@ -110,7 +119,7 @@ export function useChat(capability: Capability) {
         abortRef.current = null;
       }
     },
-    [messages, isStreaming, capability]
+    [messages, isStreaming, capability, getBest]
   );
 
   const stop = useCallback(() => {
