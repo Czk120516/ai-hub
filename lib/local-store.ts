@@ -189,8 +189,8 @@ export function localVerifyCode(
     return { success: false, error: "您的账号已被封禁" };
   }
 
-  // QR=888888 自动提升为开发者
-  if (user.qrNumber === "888888" && user.role !== "developer") {
+  // QR=88888888 自动提升为开发者
+  if (user.qrNumber === "88888888" && user.role !== "developer") {
     user.role = "developer";
     users[email] = user;
     saveUsers(users);
@@ -261,13 +261,13 @@ export function localUpdateProfile(updates: {
   if (updates.qrNumber !== undefined) {
     const qr = updates.qrNumber.toUpperCase();
     if (!/^[A-Z0-9]{6,12}$/.test(qr)) return { error: "QR 号需为 6-12 位字母或数字" };
-    // QR=888888 开发者专属（已占用就不让设）
-    if (qr === "888888") {
+    // QR=88888888 开发者专属（已占用就不让设）
+    if (qr === "88888888") {
       const qrSet = getQRSet();
-      if (qrSet.has("888888") && user.qrNumber !== "888888") {
+      if (qrSet.has("88888888") && user.qrNumber !== "88888888") {
         return { error: "该 QR 号已被占用" };
       }
-      user.role = "developer"; // 设为 888888 自动成为开发者
+      user.role = "developer"; // 设为 88888888 自动成为开发者
     } else {
       const qrSet = getQRSet();
       if (qrSet.has(qr) && qr !== user.qrNumber) return { error: "该 QR 号已被占用" };
