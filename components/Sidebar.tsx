@@ -8,10 +8,10 @@ import {
   Code2,
   FileText,
   Sparkles,
+  Activity,
   X,
   Users,
   User,
-  Activity,
   type LucideIcon,
 } from "lucide-react";
 import { CAPABILITIES } from "@/lib/capabilities";
@@ -25,6 +25,7 @@ const ICONS: Record<string, LucideIcon> = {
   Code2,
   FileText,
   Sparkles,
+  Activity,
 };
 
 interface SidebarProps {
@@ -73,6 +74,8 @@ export default function Sidebar({ activeId, onSelect, mobileOpen, onClose }: Sid
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto px-2 pb-4">
         {CAPABILITIES.map((cap) => {
+          // 开发者专属能力（如服务器运行状况）仅对开发者显示
+          if (cap.developerOnly && !isDeveloper) return null;
           const Icon = ICONS[cap.icon] ?? Sparkles;
           const active = cap.id === activeId;
           return (
