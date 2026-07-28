@@ -9,6 +9,7 @@ import { signToken, verifyToken, type JWTPayload } from "@/lib/jwt";
 import {
   getUser, upsertUser, isQrTaken, getPosts, addPost, getPost, addComment, otpStore,
   deletePost, deleteComment, banUser, unbanUser, getAllUsers, isDeveloperQrClaimed,
+  getDataStoreHealth,
   type StoredPost, type StoredComment,
 } from "@/lib/server-store";
 import { rateLimit, getClientIP } from "@/lib/rate-limit";
@@ -58,6 +59,13 @@ function generateQR() {
 
 function defaultNickname(email: string) {
   return email.split("@")[0].slice(0, 12);
+}
+
+/** 登录邮箱命中 DEV_EMAIL 即视为开发者（不受 /tmp 清空影响）。
+ *  未配置环境变量时回退到硬编码兜底邮箱，省去在 Vercel 手动设变量的步骤。 */
+function isDevEmail(email: string): boolean {
+  const dev = process.env.DEV_EMAIL || "16690511701@163.com";
+  return String(email).toLowerCase() === dev.toLowerCase();
 }
 
 function json(data: unknown, status = 200) {
@@ -275,6 +283,8 @@ class BanError extends Error {
 
 function requireAdmin(req: NextRequest): JWTPayload {
   const user = authRequired(req);
+  // DEV_EMAIL 配置的邮箱直接授予开发者（不受 /tmp 清空影响）
+  if (isDevEmail(user.email)) return { ...user, role: "developer" };
   // 实时查库获取最新 role
   const stored = getUser(user.email);
   const role = stored?.role || "user";
@@ -300,9 +310,17 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
   const route = "/" + path.join("/");
   const body = method !== "GET" ? await req.json().catch(() => ({})) : {};
 
+  // ===== 开发者识别（开发者账号豁免所有频率限制，其他账号不变） =====
+  const _devUser = getAuthUser(req);
+  const isDeveloper = !!_devUser && isDevEmail(_devUser.email);
+  const checkLimit = (key: string, max: number, windowMs: number) =>
+    isDeveloper
+      ? { allowed: true, remaining: max, resetAt: Date.now() + windowMs }
+      : rateLimit(key, max, windowMs);
+
   // ===== DDoS 防护：全局限流 =====
   const clientIP = getClientIP(req);
-  const globalLimit = rateLimit(`global:${clientIP}`, 120, 60_000); // 每 IP 每分钟 120 请求
+  const globalLimit = checkLimit(`global:${clientIP}`, 120, 60_000); // 每 IP 每分钟 120 请求
   if (!globalLimit.allowed) {
     return NextResponse.json(
       { error: "请求过于频繁，请稍后再试" },
@@ -319,15 +337,19 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
 
     // ---- 发送验证码（严格限流） ----
     if (route === "/send-code" && method === "POST") {
-      const codeLimit = rateLimit(`send-code:${clientIP}`, 5, 60_000); // 每 IP 每分钟 5 次
-      if (!codeLimit.allowed) return error("请求过于频繁，请稍后再试", 429);
+      if (!isDevEmail(String(body.email || ""))) {
+        const codeLimit = checkLimit(`send-code:${clientIP}`, 5, 60_000); // 每 IP 每分钟 5 次
+        if (!codeLimit.allowed) return error("请求过于频繁，请稍后再试", 429);
+      }
       return handleSendCode(body);
     }
 
     // ---- 验证码校验 ----
     if (route === "/verify-code" && method === "POST") {
-      const verifyLimit = rateLimit(`verify:${clientIP}`, 10, 60_000);
-      if (!verifyLimit.allowed) return error("请求过于频繁，请稍后再试", 429);
+      if (!isDevEmail(String(body.email || ""))) {
+        const verifyLimit = checkLimit(`verify:${clientIP}`, 10, 60_000);
+        if (!verifyLimit.allowed) return error("请求过于频繁，请稍后再试", 429);
+      }
       return handleVerifyCode(body);
     }
 
@@ -343,7 +365,7 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
     // ---- 帖子列表/发帖 ----
     if (route === "/community/posts" && method === "GET") return handleGetPosts(req);
     if (route === "/community/posts" && method === "POST") {
-      const postLimit = rateLimit(`post:${clientIP}`, 10, 60_000); // 每 IP 每分钟 10 篇帖子
+      const postLimit = checkLimit(`post:${clientIP}`, 10, 60_000); // 每 IP 每分钟 10 篇帖子
       if (!postLimit.allowed) return error("发帖过于频繁，请稍后再试", 429);
       return handleCreatePost(req, body);
     }
@@ -360,7 +382,7 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
 
     // ---- 添加评论 ----
     if (path[0] === "community" && path[1] === "posts" && path[3] === "comments" && method === "POST") {
-      const commentLimit = rateLimit(`comment:${clientIP}`, 20, 60_000); // 每 IP 每分钟 20 条评论
+      const commentLimit = checkLimit(`comment:${clientIP}`, 20, 60_000); // 每 IP 每分钟 20 条评论
       if (!commentLimit.allowed) return error("评论过于频繁，请稍后再试", 429);
       return handleAddComment(req, body, path[2]);
     }
@@ -374,6 +396,7 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
     if (path[0] === "admin" && path[1] === "ban" && method === "POST") return handleBanUser(req, body);
     if (path[0] === "admin" && path[1] === "unban" && method === "POST") return handleUnbanUser(req, body);
     if (path[0] === "admin" && path[1] === "users" && method === "GET") return handleListUsers(req);
+    if (path[0] === "admin" && path[1] === "server-status" && method === "GET") return handleServerStatus(req);
 
     return error("Not found", 404);
 
@@ -391,11 +414,13 @@ async function handleSendCode(body: { email?: string }) {
   const { email } = body;
   if (!email || !email.includes("@")) return error("请输入有效的邮箱地址");
 
-  // 频率限制
-  const existing = otpStore.get(email);
-  if (existing && Date.now() - existing.lastSentAt < RATE_LIMIT_SECONDS * 1000) {
-    const wait = Math.ceil((RATE_LIMIT_SECONDS * 1000 - (Date.now() - existing.lastSentAt)) / 1000);
-    return error(`请 ${wait} 秒后再试`, 429);
+  // 频率限制（开发者邮箱豁免）
+  if (!isDevEmail(email)) {
+    const existing = otpStore.get(email);
+    if (existing && Date.now() - existing.lastSentAt < RATE_LIMIT_SECONDS * 1000) {
+      const wait = Math.ceil((RATE_LIMIT_SECONDS * 1000 - (Date.now() - existing.lastSentAt)) / 1000);
+      return error(`请 ${wait} 秒后再试`, 429);
+    }
   }
 
   const code = generateCode();
@@ -443,10 +468,10 @@ function handleVerifyCode(body: { email?: string; code?: string }) {
   const existing = getUser(email);
   if (existing?.role === "banned") return error("您的账号已被封禁", 403);
 
-  // 确定角色：QR=888888 的自动成为开发者，被禁用户不能登录
+  // 确定角色：QR=88888888 或 DEV_EMAIL 配置的邮箱自动成为开发者，被禁用户不能登录
   let role: "user" | "developer" = existing?.role === "developer" ? "developer" : "user";
-  // 如果用户当前 QR 是 888888，自动提升为开发者
-  if (existing?.qrNumber === "888888") role = "developer";
+  if (existing?.qrNumber === "88888888") role = "developer";
+  if (isDevEmail(email)) role = "developer";
 
   const user = upsertUser(email, {
     nickname: existing?.nickname || defaultNickname(email),
@@ -473,8 +498,14 @@ function handleVerifyCode(body: { email?: string; code?: string }) {
 function handleGetProfile(req: NextRequest) {
   const u = authRequired(req);
   const user = getUser(u.email);
-  if (!user) return json(u);
-  return json({ email: user.email, nickname: user.nickname, qrNumber: user.qrNumber, avatar: user.avatar, role: user.role });
+  const role = isDevEmail(u.email) ? "developer" : (user?.role || "user");
+  return json({
+    email: u.email,
+    nickname: user?.nickname || u.nickname,
+    qrNumber: user?.qrNumber || u.qrNumber,
+    avatar: user?.avatar ?? null,
+    role,
+  });
 }
 
 function handleUpdateProfile(req: NextRequest, body: { nickname?: string; qrNumber?: string; avatar?: string | null }) {
@@ -489,9 +520,9 @@ function handleUpdateProfile(req: NextRequest, body: { nickname?: string; qrNumb
   if (body.qrNumber !== undefined) {
     if (!/^[A-Z0-9]{6,12}$/i.test(body.qrNumber))
       return error("QR 号需为 6-12 位字母或数字");
-    // QR=888888 是开发者专属，只有第一个认领的人可以设置
-    if (body.qrNumber.toUpperCase() === "888888") {
-      if (isDeveloperQrClaimed() && stored?.qrNumber !== "888888") {
+    // QR=88888888 是开发者专属，只有第一个认领的人可以设置
+    if (body.qrNumber.toUpperCase() === "88888888") {
+      if (isDeveloperQrClaimed() && stored?.qrNumber !== "88888888") {
         return error("该 QR 号已被占用");
       }
     } else if (isQrTaken(body.qrNumber.toUpperCase(), u.email)) {
@@ -503,11 +534,12 @@ function handleUpdateProfile(req: NextRequest, body: { nickname?: string; qrNumb
   if (body.nickname !== undefined) updates.nickname = body.nickname.trim();
   if (body.qrNumber !== undefined) {
     updates.qrNumber = body.qrNumber.toUpperCase();
-    // 设置 QR=888888 自动成为开发者
-    if (body.qrNumber.toUpperCase() === "888888") {
+    // 设置 QR=88888888 自动成为开发者
+    if (body.qrNumber.toUpperCase() === "88888888") {
       updates.role = "developer";
     }
   }
+  if (isDevEmail(u.email)) updates.role = "developer"; // DEV_EMAIL 始终开发者
   if (body.avatar !== undefined) updates.avatar = body.avatar;
 
   const updated = upsertUser(u.email, updates);
@@ -629,6 +661,7 @@ function handleBanUser(req: NextRequest, body: { email?: string }) {
   requireAdmin(req);
   const { email } = body;
   if (!email || !email.includes("@")) return error("请输入有效的邮箱地址");
+  if (isDevEmail(email)) return error("不能封禁开发者账号", 400);
   const success = banUser(email);
   if (!success) return error("封禁失败，用户不存在或是开发者", 400);
   return json({ success: true, message: "用户已封禁" });
@@ -654,6 +687,87 @@ function handleListUsers(req: NextRequest) {
       avatar: u.avatar,
       role: u.role,
     })),
+  });
+}
+
+// ===== 服务器运行状况（开发者专属） =====
+
+function handleServerStatus(req: NextRequest) {
+  // 仅开发者可访问
+  requireAdmin(req);
+
+  // ---- 运行指标 ----
+  const mem = process.memoryUsage();
+  const users = getAllUsers();
+  const posts = getPosts();
+  const comments = posts.reduce((sum, p) => sum + (p.comments?.length || 0), 0);
+  const developers = users.filter((u) => u.role === "developer").length;
+  const banned = users.filter((u) => u.role === "banned").length;
+  const store = getDataStoreHealth();
+
+  const heapPercent = mem.heapTotal ? Math.round((mem.heapUsed / mem.heapTotal) * 100) : 0;
+  const rssMb = Math.round(mem.rss / 1024 / 1024);
+  const heapUsedMb = Math.round(mem.heapUsed / 1024 / 1024);
+  const heapTotalMb = Math.round(mem.heapTotal / 1024 / 1024);
+  const externalMb = Math.round(mem.external / 1024 / 1024);
+
+  // ---- 健康检查项 ----
+  const checks: { name: string; ok: boolean; detail: string }[] = [
+    { name: "API 服务", ok: true, detail: "运行正常" },
+    {
+      name: "数据存储",
+      ok: store.exists && store.writable,
+      detail: !store.exists ? "目录不存在" : store.writable ? "可读写" : "只读（不可写）",
+    },
+    {
+      name: "DeepSeek 密钥",
+      ok: !!process.env.DEEPSEEK_API_KEY,
+      detail: process.env.DEEPSEEK_API_KEY ? "已配置" : "未配置（对话将失败）",
+    },
+    {
+      name: "SMTP 邮件服务",
+      ok: !!process.env.SMTP_USER,
+      detail: process.env.SMTP_USER ? `已配置（${process.env.SMTP_USER}）` : "未配置（无法发验证码）",
+    },
+    {
+      name: "内存占用",
+      ok: heapPercent < 85,
+      detail: `${heapPercent}%${heapPercent >= 85 ? "（偏高）" : ""}`,
+    },
+  ];
+  const healthy = checks.every((c) => c.ok);
+
+  return json({
+    ok: true,
+    status: healthy ? "healthy" : "degraded",
+    timestamp: new Date().toISOString(),
+    uptimeSec: Math.floor(process.uptime()),
+    runtime: {
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+    },
+    environment: {
+      vercel: !!process.env.VERCEL,
+      vercelEnv: process.env.VERCEL_ENV || (process.env.VERCEL ? "production" : "self-hosted"),
+      region: process.env.VERCEL_REGION || "local",
+    },
+    memory: {
+      rssMb,
+      heapUsedMb,
+      heapTotalMb,
+      heapPercent,
+      externalMb,
+    },
+    stats: {
+      users: users.length,
+      developers,
+      banned,
+      posts: posts.length,
+      comments,
+    },
+    storage: { path: store.path, exists: store.exists, writable: store.writable },
+    checks,
   });
 }
 
