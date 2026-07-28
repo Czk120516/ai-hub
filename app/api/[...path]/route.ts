@@ -310,9 +310,17 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
   const route = "/" + path.join("/");
   const body = method !== "GET" ? await req.json().catch(() => ({})) : {};
 
+  // ===== 开发者识别（开发者账号豁免所有频率限制，其他账号不变） =====
+  const _devUser = getAuthUser(req);
+  const isDeveloper = !!_devUser && isDevEmail(_devUser.email);
+  const checkLimit = (key: string, max: number, windowMs: number) =>
+    isDeveloper
+      ? { allowed: true, remaining: max, resetAt: Date.now() + windowMs }
+      : rateLimit(key, max, windowMs);
+
   // ===== DDoS 防护：全局限流 =====
   const clientIP = getClientIP(req);
-  const globalLimit = rateLimit(`global:${clientIP}`, 120, 60_000); // 每 IP 每分钟 120 请求
+  const globalLimit = checkLimit(`global:${clientIP}`, 120, 60_000); // 每 IP 每分钟 120 请求
   if (!globalLimit.allowed) {
     return NextResponse.json(
       { error: "请求过于频繁，请稍后再试" },
@@ -329,15 +337,19 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
 
     // ---- 发送验证码（严格限流） ----
     if (route === "/send-code" && method === "POST") {
-      const codeLimit = rateLimit(`send-code:${clientIP}`, 5, 60_000); // 每 IP 每分钟 5 次
-      if (!codeLimit.allowed) return error("请求过于频繁，请稍后再试", 429);
+      if (!isDevEmail(String(body.email || ""))) {
+        const codeLimit = checkLimit(`send-code:${clientIP}`, 5, 60_000); // 每 IP 每分钟 5 次
+        if (!codeLimit.allowed) return error("请求过于频繁，请稍后再试", 429);
+      }
       return handleSendCode(body);
     }
 
     // ---- 验证码校验 ----
     if (route === "/verify-code" && method === "POST") {
-      const verifyLimit = rateLimit(`verify:${clientIP}`, 10, 60_000);
-      if (!verifyLimit.allowed) return error("请求过于频繁，请稍后再试", 429);
+      if (!isDevEmail(String(body.email || ""))) {
+        const verifyLimit = checkLimit(`verify:${clientIP}`, 10, 60_000);
+        if (!verifyLimit.allowed) return error("请求过于频繁，请稍后再试", 429);
+      }
       return handleVerifyCode(body);
     }
 
@@ -353,7 +365,7 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
     // ---- 帖子列表/发帖 ----
     if (route === "/community/posts" && method === "GET") return handleGetPosts(req);
     if (route === "/community/posts" && method === "POST") {
-      const postLimit = rateLimit(`post:${clientIP}`, 10, 60_000); // 每 IP 每分钟 10 篇帖子
+      const postLimit = checkLimit(`post:${clientIP}`, 10, 60_000); // 每 IP 每分钟 10 篇帖子
       if (!postLimit.allowed) return error("发帖过于频繁，请稍后再试", 429);
       return handleCreatePost(req, body);
     }
@@ -370,7 +382,7 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
 
     // ---- 添加评论 ----
     if (path[0] === "community" && path[1] === "posts" && path[3] === "comments" && method === "POST") {
-      const commentLimit = rateLimit(`comment:${clientIP}`, 20, 60_000); // 每 IP 每分钟 20 条评论
+      const commentLimit = checkLimit(`comment:${clientIP}`, 20, 60_000); // 每 IP 每分钟 20 条评论
       if (!commentLimit.allowed) return error("评论过于频繁，请稍后再试", 429);
       return handleAddComment(req, body, path[2]);
     }
@@ -402,11 +414,13 @@ async function handleSendCode(body: { email?: string }) {
   const { email } = body;
   if (!email || !email.includes("@")) return error("请输入有效的邮箱地址");
 
-  // 频率限制
-  const existing = otpStore.get(email);
-  if (existing && Date.now() - existing.lastSentAt < RATE_LIMIT_SECONDS * 1000) {
-    const wait = Math.ceil((RATE_LIMIT_SECONDS * 1000 - (Date.now() - existing.lastSentAt)) / 1000);
-    return error(`请 ${wait} 秒后再试`, 429);
+  // 频率限制（开发者邮箱豁免）
+  if (!isDevEmail(email)) {
+    const existing = otpStore.get(email);
+    if (existing && Date.now() - existing.lastSentAt < RATE_LIMIT_SECONDS * 1000) {
+      const wait = Math.ceil((RATE_LIMIT_SECONDS * 1000 - (Date.now() - existing.lastSentAt)) / 1000);
+      return error(`请 ${wait} 秒后再试`, 429);
+    }
   }
 
   const code = generateCode();
