@@ -9,24 +9,31 @@ import {
   MessageCircle,
   Users,
   User,
+  Activity,
+  type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 
 interface AppShellProps {
   children: ReactNode;
   title: string;
-  activeNav: "chat" | "community" | "profile";
+  activeNav: "chat" | "community" | "profile" | "server";
 }
 
 export default function AppShell({ children, title, activeNav }: AppShellProps) {
   const { user, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const navItems = [
+  const isDeveloper = user?.role === "developer";
+
+  const navItems: { id: string; label: string; icon: LucideIcon; href: string }[] = [
     { id: "chat", label: "AI 对话", icon: MessageCircle, href: "/" },
     { id: "community", label: "讨论社区", icon: Users, href: "/community" },
     { id: "profile", label: "个人主页", icon: User, href: "/profile" },
   ];
+  if (isDeveloper) {
+    navItems.push({ id: "server", label: "服务器运行状况", icon: Activity, href: "/server-status" });
+  }
 
   const closeMobile = () => setMobileOpen(false);
 
