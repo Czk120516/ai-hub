@@ -11,10 +11,12 @@ import {
   X,
   Users,
   User,
+  Activity,
   type LucideIcon,
 } from "lucide-react";
 import { CAPABILITIES } from "@/lib/capabilities";
 import type { Capability } from "@/lib/types";
+import { useAuth } from "@/contexts/AuthContext";
 
 const ICONS: Record<string, LucideIcon> = {
   MessageCircle,
@@ -35,6 +37,9 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ activeId, onSelect, mobileOpen, onClose }: SidebarProps) {
+  const { user } = useAuth();
+  const isDeveloper = user?.role === "developer";
+
   // 选中能力后自动关闭移动抽屉
   const handleSelect = (cap: Capability) => {
     onSelect(cap);
@@ -129,6 +134,17 @@ export default function Sidebar({ activeId, onSelect, mobileOpen, onClose }: Sid
           </span>
           <span className="font-medium">个人主页</span>
         </a>
+        {isDeveloper && (
+          <a
+            href="/server-status"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-white/70 hover:text-slate-800"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-500">
+              <Activity className="h-4 w-4" />
+            </span>
+            <span className="font-medium">服务器运行状况</span>
+          </a>
+        )}
       </div>
 
       <div className="border-t border-slate-200 px-4 py-3">
