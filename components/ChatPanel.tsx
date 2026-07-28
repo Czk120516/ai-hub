@@ -11,6 +11,7 @@ import {
   Code2,
   FileText,
   Sparkles,
+  Activity,
   type LucideIcon,
 } from "lucide-react";
 
@@ -21,6 +22,7 @@ const ICONS: Record<string, LucideIcon> = {
   Code2,
   FileText,
   Sparkles,
+  Activity,
 };
 
 interface ChatPanelProps {
