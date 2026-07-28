@@ -37,8 +37,10 @@ export interface Capability {
   examples: string[];
   /** 采样温度 */
   temperature?: number;
-  /** 使用的模型，默认 deepseek-chat */
+  /** 使用的模型，默认 deepseek-chat（此处仅作展示名，如 "Chen-1.0"） */
   model?: string;
+  /** 是否仅开发者可见/可用（如服务器运行状况） */
+  developerOnly?: boolean;
 }
 
 /** 前端 → /api/chat 的请求体 */
