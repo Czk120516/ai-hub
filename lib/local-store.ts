@@ -23,6 +23,7 @@ export interface PostSummary {
   authorAvatar: string | null;
   createdAt: string;
   commentCount: number;
+  locationCity?: string;
 }
 
 export interface Post extends PostSummary {
@@ -321,6 +322,7 @@ export function localFetchPosts(page = 1, size = 20): { items: PostSummary[]; to
     authorAvatar: p.authorAvatar,
     createdAt: p.createdAt,
     commentCount: (p.comments || []).length,
+    locationCity: p.locationCity,
   }));
   return { items, total: all.length };
 }
@@ -334,7 +336,8 @@ export function localFetchPost(id: string): Post | null {
 /** 发帖 */
 export function localCreatePost(
   title: string,
-  content: string
+  content: string,
+  locationCity?: string
 ): { error?: string; post?: Post } {
   const email = getLocalEmail();
   if (!email) return { error: "请先登录" };
@@ -361,6 +364,7 @@ export function localCreatePost(
     createdAt: new Date().toISOString(),
     commentCount: 0,
     comments: [],
+    locationCity,
   };
 
   const posts = getPostsStore();
