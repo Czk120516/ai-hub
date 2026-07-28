@@ -7,7 +7,7 @@ import AppShell from "@/components/AppShell";
 import { Camera, Check, X, Pencil, User, Shield } from "lucide-react";
 
 function ProfilePage() {
-  const { user, token, updateProfile, signOut } = useAuth();
+  const { user, token, updateProfile } = useAuth();
 
   const [editingNickname, setEditingNickname] = useState(false);
   const [editingQr, setEditingQr] = useState(false);
@@ -111,15 +111,10 @@ function ProfilePage() {
     if (updateResult.error) setError(updateResult.error);
     else {
       setEditingQr(false);
-      // 如果设成了开发者 QR，提示重新登录
-      if (qrNumber === "888888") {
+      // 开发者 QR：后端已在响应里返回最新角色，AuthContext 已即时刷新，无需重新登录
+      if (qrNumber === "88888888") {
         setError("");
-        showMsg("QR 号已更新！正在刷新权限...");
-        setTimeout(() => {
-          if (confirm("您已将 QR 设置为开发者号 888888，需要重新登录以获取开发者权限。是否现在重新登录？")) {
-            signOut();
-          }
-        }, 1500);
+        showMsg("已升级为开发者！左侧菜单已出现「服务器运行状况」");
       } else {
         showMsg("QR 号已更新");
       }
