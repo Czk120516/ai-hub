@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLocation } from "@/contexts/LocationContext";
 import {
   fetchPosts,
   fetchPost,
@@ -34,6 +35,7 @@ import {
 
 function CommunityPage() {
   const { user, token } = useAuth();
+  const { getBest } = useLocation();
 
   // 列表状态
   const [posts, setPosts] = useState<PostSummary[]>([]);
@@ -84,7 +86,8 @@ function CommunityPage() {
     }
     setPosting(true);
     setPostError("");
-    const result = await createPost(token!, createTitle, createContent);
+    const loc = getBest();
+    const result = await createPost(token!, createTitle, createContent, loc?.city || undefined);
     setPosting(false);
     if (result.error) {
       setPostError(result.error);
@@ -213,6 +216,7 @@ function CommunityPage() {
                 </div>
                 <p className="text-[10px] text-slate-400">
                   QR: {detailPost.authorQr} · {timeAgo(detailPost.createdAt)}
+                  {detailPost.locationCity ? ` · 📍${detailPost.locationCity}` : ""}
                 </p>
               </div>
               {isDeveloper && (
@@ -537,6 +541,12 @@ function CommunityPage() {
                   <span className="text-xs text-slate-400">
                     {timeAgo(post.createdAt)}
                   </span>
+                  {post.locationCity && (
+                    <>
+                      <span className="text-xs text-slate-300">·</span>
+                      <span className="text-xs text-slate-400">📍{post.locationCity}</span>
+                    </>
+                  )}
                   {post.commentCount > 0 && (
                     <>
                       <span className="text-xs text-slate-300">·</span>
