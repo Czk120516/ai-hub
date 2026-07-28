@@ -258,3 +258,42 @@ export async function adminListUsers(token: string): Promise<{ users?: UserProfi
     return { error: "网络错误" };
   }
 }
+
+// ==================== 服务器运行状况 ====================
+
+export interface ServerCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface ServerStatus {
+  ok: boolean;
+  status: "healthy" | "degraded";
+  timestamp: string;
+  uptimeSec: number;
+  runtime: { node: string; platform: string; arch: string };
+  environment: { vercel: boolean; vercelEnv: string; region: string };
+  memory: {
+    rssMb: number;
+    heapUsedMb: number;
+    heapTotalMb: number;
+    heapPercent: number;
+    externalMb: number;
+  };
+  stats: { users: number; developers: number; banned: number; posts: number; comments: number };
+  storage: { path: string; exists: boolean; writable: boolean };
+  checks: ServerCheck[];
+}
+
+export async function fetchServerStatus(token: string): Promise<ServerStatus | null> {
+  try {
+    const res = await apiFetch("/api/admin/server-status", {
+      headers: authH(token),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as ServerStatus;
+  } catch {
+    return null;
+  }
+}
