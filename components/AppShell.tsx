@@ -16,14 +16,12 @@ import Link from "next/link";
 interface AppShellProps {
   children: ReactNode;
   title: string;
-  activeNav: "chat" | "community" | "profile";
+  activeNav: "chat" | "community" | "profile" | "server";
 }
 
 export default function AppShell({ children, title, activeNav }: AppShellProps) {
   const { user, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  const isDeveloper = user?.role === "developer";
 
   const navItems: { id: string; label: string; icon: LucideIcon; href: string }[] = [
     { id: "chat", label: "AI 对话", icon: MessageCircle, href: "/" },
