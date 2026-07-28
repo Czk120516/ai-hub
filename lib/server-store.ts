@@ -65,9 +65,9 @@ export function isQrTaken(qrNumber: string, excludeEmail?: string): boolean {
   return false;
 }
 
-/** 开发者 QR=888888 是否已被占用（含特殊保护） */
+/** 开发者 QR=88888888 是否已被占用（含特殊保护） */
 export function isDeveloperQrClaimed(): boolean {
-  return isQrTaken("888888");
+  return isQrTaken("88888888");
 }
 
 // ===== 管理员功能 =====
@@ -111,6 +111,42 @@ export function unbanUser(email: string): boolean {
 
 export function getAllUsers(): StoredUser[] {
   return Object.values(getUsers());
+}
+
+// ===== 数据存储健康检测 =====
+
+/** 返回数据目录路径（供运行状况面板展示） */
+export function getDataDir(): string {
+  return DATA_DIR;
+}
+
+/**
+ * 检测 JSON 文件存储是否可正常读写
+ */
+export function getDataStoreHealth(): { path: string; exists: boolean; writable: boolean; users: number; posts: number } {
+  let exists = false;
+  let writable = false;
+  try {
+    exists = fs.existsSync(DATA_DIR);
+  } catch {
+    exists = false;
+  }
+  try {
+    ensureDir();
+    const probe = path.join(DATA_DIR, ".health-probe");
+    fs.writeFileSync(probe, "ok");
+    fs.unlinkSync(probe);
+    writable = true;
+  } catch {
+    writable = false;
+  }
+  return {
+    path: DATA_DIR,
+    exists,
+    writable,
+    users: Object.keys(getUsers()).length,
+    posts: getPosts().length,
+  };
 }
 
 // ===== 帖子 =====
