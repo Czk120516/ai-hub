@@ -65,9 +65,9 @@ export function isQrTaken(qrNumber: string, excludeEmail?: string): boolean {
   return false;
 }
 
-/** 开发者 QR=888888 是否已被占用（含特殊保护） */
+/** 开发者 QR=88888888 是否已被占用（含特殊保护） */
 export function isDeveloperQrClaimed(): boolean {
-  return isQrTaken("888888");
+  return isQrTaken("88888888");
 }
 
 // ===== 管理员功能 =====
