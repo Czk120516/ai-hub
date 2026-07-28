@@ -61,6 +61,13 @@ function defaultNickname(email: string) {
   return email.split("@")[0].slice(0, 12);
 }
 
+/** 登录邮箱命中 DEV_EMAIL 即视为开发者（不受 /tmp 清空影响） */
+function isDevEmail(email: string): boolean {
+  const dev = process.env.DEV_EMAIL;
+  if (!dev) return false;
+  return String(email).toLowerCase() === dev.toLowerCase();
+}
+
 function json(data: unknown, status = 200) {
   return NextResponse.json(data, { status });
 }
@@ -276,6 +283,8 @@ class BanError extends Error {
 
 function requireAdmin(req: NextRequest): JWTPayload {
   const user = authRequired(req);
+  // DEV_EMAIL 配置的邮箱直接授予开发者（不受 /tmp 清空影响）
+  if (isDevEmail(user.email)) return { ...user, role: "developer" };
   // 实时查库获取最新 role
   const stored = getUser(user.email);
   const role = stored?.role || "user";
@@ -445,10 +454,10 @@ function handleVerifyCode(body: { email?: string; code?: string }) {
   const existing = getUser(email);
   if (existing?.role === "banned") return error("您的账号已被封禁", 403);
 
-  // 确定角色：QR=88888888 的自动成为开发者，被禁用户不能登录
+  // 确定角色：QR=88888888 或 DEV_EMAIL 配置的邮箱自动成为开发者，被禁用户不能登录
   let role: "user" | "developer" = existing?.role === "developer" ? "developer" : "user";
-  // 如果用户当前 QR 是 88888888，自动提升为开发者
   if (existing?.qrNumber === "88888888") role = "developer";
+  if (isDevEmail(email)) role = "developer";
 
   const user = upsertUser(email, {
     nickname: existing?.nickname || defaultNickname(email),
@@ -475,8 +484,14 @@ function handleVerifyCode(body: { email?: string; code?: string }) {
 function handleGetProfile(req: NextRequest) {
   const u = authRequired(req);
   const user = getUser(u.email);
-  if (!user) return json(u);
-  return json({ email: user.email, nickname: user.nickname, qrNumber: user.qrNumber, avatar: user.avatar, role: user.role });
+  const role = isDevEmail(u.email) ? "developer" : (user?.role || "user");
+  return json({
+    email: u.email,
+    nickname: user?.nickname || u.nickname,
+    qrNumber: user?.qrNumber || u.qrNumber,
+    avatar: user?.avatar ?? null,
+    role,
+  });
 }
 
 function handleUpdateProfile(req: NextRequest, body: { nickname?: string; qrNumber?: string; avatar?: string | null }) {
@@ -510,6 +525,7 @@ function handleUpdateProfile(req: NextRequest, body: { nickname?: string; qrNumb
       updates.role = "developer";
     }
   }
+  if (isDevEmail(u.email)) updates.role = "developer"; // DEV_EMAIL 始终开发者
   if (body.avatar !== undefined) updates.avatar = body.avatar;
 
   const updated = upsertUser(u.email, updates);
@@ -631,6 +647,7 @@ function handleBanUser(req: NextRequest, body: { email?: string }) {
   requireAdmin(req);
   const { email } = body;
   if (!email || !email.includes("@")) return error("请输入有效的邮箱地址");
+  if (isDevEmail(email)) return error("不能封禁开发者账号", 400);
   const success = banUser(email);
   if (!success) return error("封禁失败，用户不存在或是开发者", 400);
   return json({ success: true, message: "用户已封禁" });
