@@ -135,6 +135,7 @@ export interface StoredPost {
   authorAvatar: string | null;
   createdAt: string;
   comments: StoredComment[];
+  locationCity?: string;
 }
 
 export function getPosts(): StoredPost[] {
