@@ -122,16 +122,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!token) return { error: "未登录" };
       const result = await apiUpdateProfile(token, updates);
       if (result.profile) {
+        // 后端已在响应里返回最新角色（含开发者），直接刷新到 context，无需重新登录
         setUser(result.profile);
         try {
           const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
           stored.user = result.profile;
           localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
         } catch { /* ignore */ }
-        // 如果更新了 QR 号（比如设成了 888888），需要重新登录以获得新 role
-        if (updates.qrNumber) {
-          return { error: undefined, needRelogin: true };
-        }
         return {};
       }
       return { error: result.error || "更新失败" };
