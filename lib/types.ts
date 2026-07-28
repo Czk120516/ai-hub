@@ -16,6 +16,12 @@ export interface Message {
   createdAt: number;
 }
 
+/** 社区帖子摘要中的可选位置字段 */
+export interface WithLocation {
+  /** 发帖时附带的来源城市，如「杭州」 */
+  locationCity?: string;
+}
+
 /** 一个 AI 能力（能力聚合站的核心配置单元） */
 export interface Capability {
   id: string;
