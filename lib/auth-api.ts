@@ -50,6 +50,7 @@ export interface PostSummary {
   authorAvatar: string | null;
   createdAt: string;
   commentCount: number;
+  locationCity?: string;
 }
 
 export interface Post extends PostSummary {
@@ -160,18 +161,23 @@ export async function fetchPost(id: string): Promise<Post | null> {
   }
 }
 
-export async function createPost(token: string, title: string, content: string) {
+export async function createPost(
+  token: string,
+  title: string,
+  content: string,
+  locationCity?: string
+) {
   try {
     const res = await apiFetch("/api/community/posts", {
       method: "POST",
       headers: authH(token),
-      body: JSON.stringify({ title, content }),
+      body: JSON.stringify({ title, content, locationCity }),
     });
     const data = await res.json();
     if (!res.ok) return { error: data.error || "发帖失败" };
     return { post: data as Post };
   } catch {
-    return localCreatePost(title, content);
+    return localCreatePost(title, content, locationCity);
   }
 }
 
@@ -250,5 +256,44 @@ export async function adminListUsers(token: string): Promise<{ users?: UserProfi
     return await res.json();
   } catch {
     return { error: "网络错误" };
+  }
+}
+
+// ==================== 服务器运行状况 ====================
+
+export interface ServerCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface ServerStatus {
+  ok: boolean;
+  status: "healthy" | "degraded";
+  timestamp: string;
+  uptimeSec: number;
+  runtime: { node: string; platform: string; arch: string };
+  environment: { vercel: boolean; vercelEnv: string; region: string };
+  memory: {
+    rssMb: number;
+    heapUsedMb: number;
+    heapTotalMb: number;
+    heapPercent: number;
+    externalMb: number;
+  };
+  stats: { users: number; developers: number; banned: number; posts: number; comments: number };
+  storage: { path: string; exists: boolean; writable: boolean };
+  checks: ServerCheck[];
+}
+
+export async function fetchServerStatus(token: string): Promise<ServerStatus | null> {
+  try {
+    const res = await apiFetch("/api/admin/server-status", {
+      headers: authH(token),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as ServerStatus;
+  } catch {
+    return null;
   }
 }
