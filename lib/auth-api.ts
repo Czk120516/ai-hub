@@ -50,6 +50,7 @@ export interface PostSummary {
   authorAvatar: string | null;
   createdAt: string;
   commentCount: number;
+  locationCity?: string;
 }
 
 export interface Post extends PostSummary {
@@ -160,18 +161,23 @@ export async function fetchPost(id: string): Promise<Post | null> {
   }
 }
 
-export async function createPost(token: string, title: string, content: string) {
+export async function createPost(
+  token: string,
+  title: string,
+  content: string,
+  locationCity?: string
+) {
   try {
     const res = await apiFetch("/api/community/posts", {
       method: "POST",
       headers: authH(token),
-      body: JSON.stringify({ title, content }),
+      body: JSON.stringify({ title, content, locationCity }),
     });
     const data = await res.json();
     if (!res.ok) return { error: data.error || "发帖失败" };
     return { post: data as Post };
   } catch {
-    return localCreatePost(title, content);
+    return localCreatePost(title, content, locationCity);
   }
 }
 
