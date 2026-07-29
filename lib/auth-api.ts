@@ -98,6 +98,19 @@ export async function verifyCode(email: string, code: string) {
   }
 }
 
+/** 开发者免验证码直登（仅 DEV_EMAIL 可用） */
+export async function devLogin(email: string) {
+  try {
+    const res = await apiFetch("/api/dev-login", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+    return await res.json();
+  } catch {
+    return { error: "网络错误" };
+  }
+}
+
 // ==================== 用户资料 ====================
 
 export async function fetchProfile(token: string): Promise<UserProfile | null> {
