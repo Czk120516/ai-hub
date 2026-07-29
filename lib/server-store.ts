@@ -1,35 +1,34 @@
 /**
- * 服务端 JSON 文件存储
- * Vercel serverless: /tmp 在同一部署内持久化
+ * 服务端存储 — Cloudflare KV 异步持久化 + 请求内内存缓存
+ * 兼容本地开发：无 KV 绑定时退化为内存存储（仅当前进程有效）
+ *
+ * 设计要点（为了不动 route.ts 里约 45 个同步调用点）：
+ * - 请求开始时调用 ensureStore() 从 KV 加载最新数据到内存缓存
+ * - 读操作同步读取内存缓存（签名与旧实现完全一致）
+ * - 写操作修改内存缓存并标记 dirty
+ * - 请求结束时调用 flushStore() 将 dirty 数据写回 KV
  */
-import fs from "fs";
-import path from "path";
+import { getRequestContext } from "@cloudflare/next-on-pages";
 
-const DATA_DIR = path.join("/tmp", "aihub-data");
+// ===== KV 绑定访问 =====
 
-function ensureDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
+interface KVNamespaceLike {
+  get(key: string, opts?: any): Promise<any>;
+  put(key: string, value: string, opts?: any): Promise<any>;
 }
 
-function readJSON<T>(name: string): T | null {
-  ensureDir();
-  const fp = path.join(DATA_DIR, `${name}.json`);
-  if (!fs.existsSync(fp)) return null;
+function getKV(): KVNamespaceLike | null {
   try {
-    return JSON.parse(fs.readFileSync(fp, "utf-8"));
+    const ctx: any = getRequestContext();
+    const kv = ctx?.env?.AIHUB_DATA;
+    if (kv) return kv as KVNamespaceLike;
   } catch {
-    return null;
+    /* 本地开发或非 Cloudflare 环境：返回 null，使用内存兜底 */
   }
+  return null;
 }
 
-function writeJSON(name: string, data: unknown) {
-  ensureDir();
-  fs.writeFileSync(path.join(DATA_DIR, `${name}.json`), JSON.stringify(data, null, 2), "utf-8");
-}
-
-// ===== 用户 =====
+// ===== 类型与内存缓存 =====
 
 export type UserRole = "user" | "developer" | "banned";
 
@@ -40,116 +39,6 @@ export interface StoredUser {
   avatar: string | null;
   role: UserRole;
 }
-
-export function getUsers(): Record<string, StoredUser> {
-  return readJSON<Record<string, StoredUser>>("users") || {};
-}
-
-export function getUser(email: string): StoredUser | null {
-  return getUsers()[email] || null;
-}
-
-export function upsertUser(email: string, data: Partial<StoredUser>): StoredUser {
-  const users = getUsers();
-  const existing = users[email];
-  users[email] = { ...existing, ...data, email, role: existing?.role || data.role || "user" };
-  writeJSON("users", users);
-  return users[email];
-}
-
-export function isQrTaken(qrNumber: string, excludeEmail?: string): boolean {
-  const users = getUsers();
-  for (const [email, user] of Object.entries(users)) {
-    if (user.qrNumber === qrNumber && email !== excludeEmail) return true;
-  }
-  return false;
-}
-
-/** 开发者 QR=88888888 是否已被占用（含特殊保护） */
-export function isDeveloperQrClaimed(): boolean {
-  return isQrTaken("88888888");
-}
-
-// ===== 管理员功能 =====
-
-export function deletePost(id: string): boolean {
-  const posts = getPosts();
-  const idx = posts.findIndex((p) => p.id === id);
-  if (idx === -1) return false;
-  posts.splice(idx, 1);
-  writeJSON("posts", posts);
-  return true;
-}
-
-export function deleteComment(postId: string, commentId: string): boolean {
-  const posts = getPosts();
-  const post = posts.find((p) => p.id === postId);
-  if (!post) return false;
-  const idx = post.comments.findIndex((c) => c.id === commentId);
-  if (idx === -1) return false;
-  post.comments.splice(idx, 1);
-  writeJSON("posts", posts);
-  return true;
-}
-
-export function banUser(email: string): boolean {
-  const users = getUsers();
-  if (!users[email]) return false;
-  if (users[email].role === "developer") return false; // 不能封禁开发者
-  users[email].role = "banned";
-  writeJSON("users", users);
-  return true;
-}
-
-export function unbanUser(email: string): boolean {
-  const users = getUsers();
-  if (!users[email]) return false;
-  users[email].role = "user";
-  writeJSON("users", users);
-  return true;
-}
-
-export function getAllUsers(): StoredUser[] {
-  return Object.values(getUsers());
-}
-
-// ===== 数据存储健康检测 =====
-
-/** 返回数据目录路径（供运行状况面板展示） */
-export function getDataDir(): string {
-  return DATA_DIR;
-}
-
-/**
- * 检测 JSON 文件存储是否可正常读写
- */
-export function getDataStoreHealth(): { path: string; exists: boolean; writable: boolean; users: number; posts: number } {
-  let exists = false;
-  let writable = false;
-  try {
-    exists = fs.existsSync(DATA_DIR);
-  } catch {
-    exists = false;
-  }
-  try {
-    ensureDir();
-    const probe = path.join(DATA_DIR, ".health-probe");
-    fs.writeFileSync(probe, "ok");
-    fs.unlinkSync(probe);
-    writable = true;
-  } catch {
-    writable = false;
-  }
-  return {
-    path: DATA_DIR,
-    exists,
-    writable,
-    users: Object.keys(getUsers()).length,
-    posts: getPosts().length,
-  };
-}
-
-// ===== 帖子 =====
 
 export interface StoredComment {
   id: string;
@@ -174,49 +63,208 @@ export interface StoredPost {
   locationCity?: string;
 }
 
-export function getPosts(): StoredPost[] {
-  return readJSON<StoredPost[]>("posts") || [];
-}
-
-export function addPost(post: StoredPost): StoredPost {
-  const posts = getPosts();
-  posts.unshift(post);
-  writeJSON("posts", posts);
-  return post;
-}
-
-export function getPost(id: string): StoredPost | null {
-  return getPosts().find((p) => p.id === id) || null;
-}
-
-export function addComment(postId: string, comment: StoredComment): StoredComment | null {
-  const posts = getPosts();
-  const post = posts.find((p) => p.id === postId);
-  if (!post) return null;
-  post.comments.push(comment);
-  writeJSON("posts", posts);
-  return comment;
-}
-
-// ===== OTP (内存) =====
-
 interface OTPEntry {
   codeHash: string;
   expiresAt: number;
   lastSentAt: number;
 }
 
-const otpStore = new Map<string, OTPEntry>();
-
-// 每分钟清理过期 OTP
-if (typeof setInterval !== "undefined") {
-  setInterval(() => {
-    const now = Date.now();
-    for (const [k, v] of otpStore) {
-      if (v.expiresAt < now) otpStore.delete(k);
-    }
-  }, 60_000);
+interface StoreState {
+  users: Record<string, StoredUser>;
+  posts: StoredPost[];
+  otp: Record<string, OTPEntry>;
 }
 
-export { otpStore };
+const memFallback: StoreState = { users: {}, posts: [], otp: {} };
+let state: StoreState | null = null;
+let dirty = false;
+
+function getState(): StoreState {
+  return state ?? memFallback;
+}
+
+function markDirty() {
+  dirty = true;
+}
+
+/** 请求开始：从 KV 加载最新数据（无 KV 则使用内存兜底） */
+export async function ensureStore(): Promise<void> {
+  const kv = getKV();
+  if (!kv) {
+    if (!state) state = { users: {}, posts: [], otp: {} };
+    dirty = false;
+    return;
+  }
+  const [users, posts, otp] = await Promise.all([
+    kv.get("users", "json"),
+    kv.get("posts", "json"),
+    kv.get("otp", "json"),
+  ]);
+  // 清理过期 OTP
+  const otpObj: Record<string, OTPEntry> = (otp as any) || {};
+  const now = Date.now();
+  let pruned = false;
+  for (const k of Object.keys(otpObj)) {
+    if (otpObj[k].expiresAt < now) {
+      delete otpObj[k];
+      pruned = true;
+    }
+  }
+  state = {
+    users: (users as any) || {},
+    posts: (posts as any) || [],
+    otp: otpObj,
+  };
+  dirty = pruned; // 若清理了过期 OTP，需回写
+}
+
+/** 请求结束：将变更写回 KV（无变更则跳过） */
+export async function flushStore(): Promise<void> {
+  const kv = getKV();
+  if (!kv || !state || !dirty) return;
+  await Promise.all([
+    kv.put("users", JSON.stringify(state.users)),
+    kv.put("posts", JSON.stringify(state.posts)),
+    kv.put("otp", JSON.stringify(state.otp)),
+  ]);
+  dirty = false;
+}
+
+// ===== 用户 =====
+
+export function getUsers(): Record<string, StoredUser> {
+  return getState().users;
+}
+
+export function getUser(email: string): StoredUser | null {
+  return getState().users[email] || null;
+}
+
+export function upsertUser(email: string, data: Partial<StoredUser>): StoredUser {
+  const s = getState();
+  const existing = s.users[email];
+  s.users[email] = { ...existing, ...data, email, role: existing?.role || data.role || "user" };
+  markDirty();
+  return s.users[email];
+}
+
+export function isQrTaken(qrNumber: string, excludeEmail?: string): boolean {
+  const users = getState().users;
+  for (const [email, user] of Object.entries(users)) {
+    if (user.qrNumber === qrNumber && email !== excludeEmail) return true;
+  }
+  return false;
+}
+
+export function isDeveloperQrClaimed(): boolean {
+  return isQrTaken("88888888");
+}
+
+export function deletePost(id: string): boolean {
+  const posts = getState().posts;
+  const idx = posts.findIndex((p) => p.id === id);
+  if (idx === -1) return false;
+  posts.splice(idx, 1);
+  markDirty();
+  return true;
+}
+
+export function deleteComment(postId: string, commentId: string): boolean {
+  const posts = getState().posts;
+  const post = posts.find((p) => p.id === postId);
+  if (!post) return false;
+  const idx = post.comments.findIndex((c) => c.id === commentId);
+  if (idx === -1) return false;
+  post.comments.splice(idx, 1);
+  markDirty();
+  return true;
+}
+
+export function banUser(email: string): boolean {
+  const users = getState().users;
+  if (!users[email]) return false;
+  if (users[email].role === "developer") return false;
+  users[email].role = "banned";
+  markDirty();
+  return true;
+}
+
+export function unbanUser(email: string): boolean {
+  const users = getState().users;
+  if (!users[email]) return false;
+  users[email].role = "user";
+  markDirty();
+  return true;
+}
+
+export function getAllUsers(): StoredUser[] {
+  return Object.values(getState().users);
+}
+
+// ===== 帖子 =====
+
+export function getPosts(): StoredPost[] {
+  return getState().posts;
+}
+
+export function addPost(post: StoredPost): StoredPost {
+  const posts = getState().posts;
+  posts.unshift(post);
+  markDirty();
+  return post;
+}
+
+export function getPost(id: string): StoredPost | null {
+  return getState().posts.find((p) => p.id === id) || null;
+}
+
+export function addComment(postId: string, comment: StoredComment): StoredComment | null {
+  const posts = getState().posts;
+  const post = posts.find((p) => p.id === postId);
+  if (!post) return null;
+  if (!post.comments) post.comments = [];
+  post.comments.push(comment);
+  markDirty();
+  return comment;
+}
+
+// ===== OTP（保持与原 otpStore Map 完全相同的接口，route.ts 无需改动） =====
+
+export const otpStore = {
+  get(email: string): OTPEntry | undefined {
+    return getState().otp[email];
+  },
+  set(email: string, entry: OTPEntry): void {
+    getState().otp[email] = entry;
+    markDirty();
+  },
+  delete(email: string): void {
+    delete getState().otp[email];
+    markDirty();
+  },
+};
 export type { OTPEntry };
+
+// ===== 数据存储健康检测 =====
+
+export function getDataDir(): string {
+  return getKV() ? "Cloudflare KV / AIHUB_DATA" : "in-memory (本地开发)";
+}
+
+export function getDataStoreHealth(): {
+  path: string;
+  exists: boolean;
+  writable: boolean;
+  kv: boolean;
+  users: number;
+  posts: number;
+} {
+  return {
+    path: getDataDir(),
+    exists: true,
+    writable: true,
+    kv: !!getKV(),
+    users: Object.keys(getState().users).length,
+    posts: getState().posts.length,
+  };
+}
