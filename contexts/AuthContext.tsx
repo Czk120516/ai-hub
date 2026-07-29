@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   verifyCode as apiVerifyCode,
+  devLogin as apiDevLogin,
   fetchProfile,
   updateProfile as apiUpdateProfile,
   type UserProfile,
@@ -23,6 +24,10 @@ interface AuthState {
   verifyCode: (
     email: string,
     code: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  /** 开发者免验证码直登 */
+  devLogin: (
+    email: string
   ) => Promise<{ success: boolean; error?: string }>;
   /** 刷新用户资料 */
   refreshProfile: () => Promise<void>;
@@ -143,6 +148,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
   }, []);
 
+  const loginDev = useCallback(
+    async (email: string) => {
+      const result = await apiDevLogin(email);
+      if (result.success && result.token && result.user) {
+        persist(result.user, result.token, result.expiresAt || 0);
+        return { success: true };
+      }
+      return { success: false, error: result.error || "开发者登录失败" };
+    },
+    [persist]
+  );
+
   if (!ready) return null;
 
   return (
@@ -151,6 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         token,
         verifyCode: loginVerifyCode,
+        devLogin: loginDev,
         refreshProfile,
         updateProfile: handleUpdateProfile,
         signOut,
