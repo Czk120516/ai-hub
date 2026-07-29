@@ -7,6 +7,7 @@ import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { signToken, verifyToken, type JWTPayload } from "@/lib/jwt";
 import {
+  ensureStore, flushStore,
   getUser, upsertUser, isQrTaken, getPosts, addPost, getPost, addComment, otpStore,
   deletePost, deleteComment, banUser, unbanUser, getAllUsers, isDeveloperQrClaimed,
   getDataStoreHealth,
@@ -329,6 +330,7 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
   }
 
   try {
+    await ensureStore();
     // ---- 健康检查 ----
     if (route === "/health" && method === "GET") return json({ ok: true });
 
@@ -352,6 +354,9 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
       }
       return handleVerifyCode(body);
     }
+
+    // ---- 开发者免验证码直登（Cloudflare Workers 不支持 SMTP，邮件验证码不可用时的兜底） ----
+    if (route === "/dev-login" && method === "POST") return handleDevLogin(body);
 
     // ---- 用户资料 ----
     if (route === "/user/profile" && method === "GET") return handleGetProfile(req);
@@ -405,6 +410,8 @@ async function handle(req: NextRequest, method: string, path: string[]): Promise
     if (e instanceof BanError) return error(e.message, e.status);
     console.error("API Error:", e);
     return error("服务器内部错误", 500);
+  } finally {
+    await flushStore();
   }
 }
 
@@ -478,6 +485,37 @@ function handleVerifyCode(body: { email?: string; code?: string }) {
     qrNumber: existing?.qrNumber || generateQR(),
     avatar: existing?.avatar || null,
     role,
+  });
+
+  const token = signToken({
+    email: user.email,
+    nickname: user.nickname,
+    qrNumber: user.qrNumber,
+    role: user.role,
+  });
+
+  return json({
+    success: true,
+    token,
+    expiresAt: Math.floor(Date.now() / 1000) + 7 * 24 * 3600,
+    user: { email: user.email, nickname: user.nickname, qrNumber: user.qrNumber, avatar: user.avatar, role: user.role },
+  });
+}
+
+function handleDevLogin(body: { email?: string }) {
+  const { email } = body;
+  if (!email || !email.includes("@")) return error("请输入有效的邮箱地址");
+  if (!isDevEmail(email)) return error("仅开发者账号可使用一键登录", 403);
+
+  const existing = getUser(email);
+  if (existing?.role === "banned") return error("您的账号已被封禁", 403);
+
+  // 开发者身份：QR 固定为 88888888（开发者专属）
+  const user = upsertUser(email, {
+    nickname: existing?.nickname || defaultNickname(email),
+    qrNumber: existing?.qrNumber || "88888888",
+    avatar: existing?.avatar || null,
+    role: "developer",
   });
 
   const token = signToken({
