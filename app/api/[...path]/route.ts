@@ -15,6 +15,7 @@ import {
 } from "@/lib/server-store";
 import { rateLimit, getClientIP } from "@/lib/rate-limit";
 import { streamDeepSeekChat } from "@/lib/deepseek";
+import { runChenDiagnosis, type ChenStatus } from "@/lib/chen-diagnosis";
 
 // ===== 常量 =====
 
@@ -809,11 +810,33 @@ function handleServerStatus(req: NextRequest) {
   });
 }
 
+// ===== 本地文本流式返回（供 Chen-1.0 等非 LLM 能力使用） =====
+function streamText(text: string): NextResponse {
+  const encoder = new TextEncoder();
+  const chunks = text.match(/[\s\S]{1,120}/g) || [text];
+  const stream = new ReadableStream({
+    async start(controller) {
+      for (const c of chunks) {
+        controller.enqueue(encoder.encode(c));
+        await new Promise((r) => setTimeout(r, 12));
+      }
+      controller.close();
+    },
+  });
+  return new NextResponse(stream, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
 // ===== Chat 代理（服务端调用 DeepSeek，前端不接触 API Key） =====
 
 async function handleChat(
   req: NextRequest,
-  body: { messages?: ChatMessage[]; temperature?: number; lat?: number; lng?: number; locName?: string; locSource?: string }
+  body: { messages?: ChatMessage[]; temperature?: number; lat?: number; lng?: number; locName?: string; locSource?: string; capabilityId?: string; serverStatus?: ChenStatus | null }
 ) {
   const { messages = [], temperature = 0.7 } = body;
 
@@ -832,6 +855,12 @@ async function handleChat(
   // 用户最后一条消息
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
   const userText = lastUser?.content || "";
+
+  // ===== 服务器运行状况能力：仅由本地 Chen-1.0 诊断引擎作答，绝不调用 DeepSeek =====
+  if (body.capabilityId === "server-health") {
+    const diagnosis = runChenDiagnosis({ status: body.serverStatus ?? null, userText });
+    return streamText(diagnosis);
+  }
 
   // ===== 意图识别 + 工具调用 =====
   let toolResult: string | null = null;
