@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import type { Message, ChatMessage, Capability } from "@/lib/types";
 import { useLocation, type BestLocation } from "@/contexts/LocationContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchServerStatus } from "@/lib/auth-api";
+import { fetchServerStatus, type ServerStatus } from "@/lib/auth-api";
 
 /**
  * 通过服务端 API 代理调用 DeepSeek（API Key 仅服务端，前端不接触）
@@ -14,6 +14,8 @@ async function fetchChatStream(
   temperature: number,
   signal: AbortSignal,
   loc: BestLocation | null,
+  capabilityId?: string,
+  serverStatus?: ServerStatus | null,
 ): Promise<ReadableStream<Uint8Array>> {
   const res = await fetch("/api/chat", {
     method: "POST",
@@ -22,6 +24,8 @@ async function fetchChatStream(
       messages: apiMessages,
       temperature,
       ...(loc ? { lat: loc.lat, lng: loc.lng, locName: loc.city, locSource: loc.source } : {}),
+      ...(capabilityId ? { capabilityId } : {}),
+      ...(serverStatus ? { serverStatus } : {}),
     }),
     signal,
   });
@@ -76,19 +80,19 @@ export function useChat(capability: Capability) {
 
       // 构造系统提示词；开发者专属能力会先拉取实时服务器指标注入
       let systemPrompt = capability.systemPrompt;
+      let serverStatusData: Awaited<ReturnType<typeof fetchServerStatus>> | null = null;
       if (capability.developerOnly) {
         if (!token) {
           setError("该能力仅开发者可用，请先以开发者账号登录");
           return;
         }
-        let status: Awaited<ReturnType<typeof fetchServerStatus>> = null;
         try {
-          status = await fetchServerStatus(token);
+          serverStatusData = await fetchServerStatus(token);
         } catch {
-          status = null;
+          serverStatusData = null;
         }
         if (status) {
-          const metrics = JSON.stringify(status, null, 2);
+          const metrics = JSON.stringify(serverStatusData, null, 2);
           systemPrompt =
             systemPrompt +
             "\n\n【服务器实时运行指标（最新）】\n" +
@@ -125,6 +129,8 @@ export function useChat(capability: Capability) {
           capability.temperature ?? 0.7,
           controller.signal,
           loc,
+          capability.id,
+          capability.id === "server-health" ? serverStatusData : undefined,
         );
 
         const reader = stream.getReader();
