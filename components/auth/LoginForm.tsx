@@ -6,7 +6,7 @@ import { sendCode } from "@/lib/auth-api";
 import { Mail, ArrowRight, Sparkles, Hash } from "lucide-react";
 
 export default function LoginForm() {
-  const { verifyCode } = useAuth();
+  const { verifyCode, devLogin } = useAuth();
 
   const [email, setEmail] = useState("");
   const [code, setCode] = useState(["", "", "", "", "", ""]);
@@ -102,6 +102,20 @@ export default function LoginForm() {
     }
   };
 
+  const handleDevLogin = async () => {
+    setError("");
+    if (!email.includes("@") || !email.includes(".")) {
+      setError("请输入有效的邮箱地址");
+      return;
+    }
+    setLoading(true);
+    const result = await devLogin(email.trim());
+    setLoading(false);
+    if (!result.success && result.error) {
+      setError(result.error);
+    }
+  };
+
   return (
     <div className="flex min-h-dvh items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-sm">
@@ -139,6 +153,16 @@ export default function LoginForm() {
               autoComplete="email"
             />
           </div>
+
+          {/* 开发者免验证码直登 */}
+          <button
+            type="button"
+            onClick={handleDevLogin}
+            disabled={loading || !email}
+            className="mb-4 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-indigo-300 px-4 py-2.5 text-sm font-medium text-indigo-600 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            开发者免验证码登录
+          </button>
 
           {/* 发送验证码按钮 */}
           {!codeSent && (
